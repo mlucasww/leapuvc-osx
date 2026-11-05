@@ -107,6 +107,7 @@ def main():
 
     done = leap.helper.event("done") or {}
     torn = getattr(leap, "torn", None)
+    published = done.get("frames_published", 0)
     report = {
         "recorded_at": datetime.now().isoformat(timespec="seconds"),
         "resolution": [args.width, args.height],
@@ -117,6 +118,9 @@ def main():
         "calibration_source": leap.calibrationSource,
         "frames_received": leap.framesReceived,
         "frames_skipped_by_reader": leap.framesSkipped,
+        # Frames outside the reader's lifetime are expected, and aren't losses.
+        "frames_before_reader_started": max(0, leap.firstSequence - 1),
+        "frames_after_reader_stopped": max(0, published - leap.lastSequence),
         "torn_frames": torn,
         "helper_summary": done,
         "largest_frame_gap_ms": round(log.largest_gap_ms, 1),

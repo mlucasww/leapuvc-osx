@@ -85,6 +85,47 @@ def test_reader_jumps_to_the_newest_frame_after_wrapping(tmp_path):
     frames.close()
 
 
+def test_read_next_starts_at_the_newest_frame(tmp_path):
+    path = tmp_path / "frames.ring"
+    writer = FakeWriter(path)
+    for value in range(3):
+        writer.write(value)
+    frames = ring.FrameRing(path)
+
+    assert frames.read_next().sequence == 3
+    frames.close()
+
+
+def test_read_next_catches_up_in_order(tmp_path):
+    path = tmp_path / "frames.ring"
+    writer = FakeWriter(path)
+    for value in range(4):
+        writer.write(value)
+    frames = ring.FrameRing(path)
+
+    assert frames.read_next(after=2).sequence == 3
+    assert frames.read_next(after=3).sequence == 4
+    assert frames.read_next(after=4) is None
+    assert frames.torn == 0
+    frames.close()
+
+
+def test_read_next_jumps_forward_when_too_far_behind(tmp_path):
+    path = tmp_path / "frames.ring"
+    writer = FakeWriter(path)
+    for value in range(10):
+        writer.write(value)
+    frames = ring.FrameRing(path)
+
+    frame = frames.read_next(after=1)
+
+    # With 4 slots, frame 7 is next to be overwritten, so 8 is the oldest safe one.
+    assert frame.sequence == 8
+    assert frame.payload == bytes([7]) * PAYLOAD
+    assert frames.torn == 0
+    frames.close()
+
+
 def test_a_slot_being_overwritten_is_rejected(tmp_path):
     path = tmp_path / "frames.ring"
     writer = FakeWriter(path)

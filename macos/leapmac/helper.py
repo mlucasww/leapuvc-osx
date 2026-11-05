@@ -7,6 +7,9 @@ import time
 
 STOP_TIMEOUT_S = 5.0
 
+# Eight slots give a reader about 100 ms of headroom at 57.5 FPS, in order.
+RING_SLOTS = 8
+
 
 class StreamHelper:
     def __init__(self, leapcap, unique_id, width, height, ring_path, pixel_format="yuvs"):
@@ -17,6 +20,7 @@ class StreamHelper:
             "--width", str(width),
             "--height", str(height),
             "--pixel-format", pixel_format,
+            "--slots", str(RING_SLOTS),
         ]
         self.events = []
         self.ended = False

@@ -147,6 +147,7 @@ class leapImageThread(_shared.leapImageThread):
         self.frameListener = None
         self.framesReceived = 0
         self.framesSkipped = 0
+        self.firstSequence = 0
         self.lastSequence = 0
 
         self.helper = None
@@ -210,7 +211,7 @@ class leapImageThread(_shared.leapImageThread):
         width, height = self.resolution
         try:
             while time.time() - self.timeoutTimer < self.timeout and not self._stopRequested:
-                frame = self.ring.read_latest(self.lastSequence)
+                frame = self.ring.read_next(self.lastSequence)
                 if frame is None:
                     if not self.helper.alive():
                         print("The leapcap helper stopped unexpectedly.")
@@ -226,6 +227,8 @@ class leapImageThread(_shared.leapImageThread):
     def _publish(self, frame, width, height):
         if self.lastSequence:
             self.framesSkipped += frame.sequence - self.lastSequence - 1
+        else:
+            self.firstSequence = frame.sequence
         self.lastSequence = frame.sequence
         self.framesReceived += 1
 

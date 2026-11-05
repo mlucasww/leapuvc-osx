@@ -71,12 +71,31 @@ class FrameRing:
     def read_latest(self, after=0):
         """Return the newest frame if it is newer than `after`, otherwise None.
 
-        A frame overwritten during the copy counts as torn, and returns None.
+        This suits a slow consumer that only wants fresh data.
         """
         sequence = self.latest_sequence()
         if sequence <= after:
             return None
+        return self._read_slot(sequence)
 
+    def read_next(self, after=0):
+        """Return the frame after `after`, so a brief stall loses nothing.
+
+        With `after` of 0 this starts at the newest frame. A reader that falls
+        too far behind jumps forward to the oldest slot that's still safe, so
+        the caller sees the gap in the sequence numbers.
+        """
+        latest = self.latest_sequence()
+        if latest <= after:
+            return None
+        if after == 0:
+            return self._read_slot(latest)
+        # The writer's next frame replaces latest + 1 - slot_count, so stay clear of it.
+        oldest_safe = max(1, latest - self.slot_count + 2)
+        return self._read_slot(max(after + 1, oldest_safe))
+
+    def _read_slot(self, sequence):
+        """Copy one slot. A frame overwritten during the copy counts as torn."""
         slot = HEADER_SIZE + (sequence % self.slot_count) * self.slot_stride
         if _U64.unpack_from(self._map, slot + SLOT_END_OFFSET)[0] != sequence:
             self.torn += 1

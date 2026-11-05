@@ -164,7 +164,7 @@ The 30-second run measured 57.55 FPS over 1727 frames, with none dropped. The fi
 **Open items to carry forward:**
 
 - **Exposure response is weak.** Four times the exposure raised mean brightness only 22 to 30%, below the probe's own 1.3× threshold in the final run. Check 3 passed on other controls. Gamma, saturation and LED output may all contribute, none tested. Exposure shouldn't be treated as linear.
-- **Frame alternation is unproven.** `frame_label` read 1 in every sample, but all samples fell on even frame indices, so this may be aliasing. Phase 1 should log consecutive frames.
+- **Frame alternation: settled in Phase 1.** Logging 3454 consecutive frames found `frame_label` was 1 on every one, so it doesn't alternate in this mode, and the earlier result wasn't aliasing.
 - **Left and right brightness can differ.** Left read about 10% dimmer in the final run but equal in the one before, which suggests the scene rather than a sensor offset. It needs checking.
 - **The 13-second delay is only explained by elimination.** It disappeared once OpenCV was imported before streaming, but its cause wasn't measured directly.
 - **Restored settings weren't verified.** The probe restores exposure and gain, but it doesn't read them back afterwards.
