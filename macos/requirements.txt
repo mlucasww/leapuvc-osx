@@ -1,0 +1,4 @@
+# Phase 0. Later phases add scipy, and rerun-sdk needs Python 3.11 or later.
+numpy>=1.26
+opencv-python>=4.9
+pytest>=8.0
