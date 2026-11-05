@@ -42,18 +42,20 @@ Phase 0 confirmed this works on an unlocked Leap, with both cameras' bytes intac
 
 ## Known issues in the existing code
 
-These will be fixed in Phase 1:
+Fixed in Phase 1, which changes `Python/leapuvc.py` on every platform:
 
-- `Python/leapuvc.py:204` uses the left camera's tangential distortion for both cameras.
-- `calibrationArray[5]`, the baseline, is parsed but never stored. Metric depth needs it.
-- `Python/leapuvc.py:211` rectifies each camera to its own matrix. That's fine for a preview, but metric depth needs one shared matrix.
+- The right camera used the left camera's tangential distortion. Each camera now uses its own, which slightly changes the right camera's rectification.
+- The baseline was parsed but never stored. It's now `calibration["baseline"]`.
+- `cv2.CV_8UC1` was passed as the undistortion map type, and only worked because OpenCV treats 0 as its default. It's now `cv2.CV_16SC2` explicitly.
+
+Still to fix in Phase 2: `parseLeapCalibration` rectifies each camera to its own matrix. That's fine for a preview, but metric depth needs one shared matrix.
 
 ## Phase status
 
 | Phase | Status |
 |---|---|
 | 0. Prove the path on hardware | Done: Path A confirmed |
-| 1. Capture and control port | Not started |
+| 1. Capture and control port | Code written, not yet run |
 | 2. Metric stereo | Not started |
 | 3. Live point cloud | Not started |
 | 4. Camera mount | Not started |

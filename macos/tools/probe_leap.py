@@ -33,12 +33,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from leapmac import calibration_blob, frames, uvc_control  # noqa: E402
+from leapmac.devices import DEFAULT_PID, DEFAULT_VID, matches_leap, run_leapcap_list  # noqa: E402
 from leapmac.probe_decision import BLOCKED, FAIL, INCONCLUSIVE, PASS, decide  # noqa: E402
-
-# The commonly reported Leap IDs, not confirmed by the manual. Override them
-# with --vid and --pid if the probe does not find the device.
-DEFAULT_VID = 0xF182
-DEFAULT_PID = 0x0003
 
 # Long enough for slow first-time imports and USB opens, as well as every step.
 CAPTURE_SECONDS = 30
@@ -160,30 +156,6 @@ def probe_usb(usb, args):
             "device": asdict(device.info),
             "topology": asdict(device.topology),
         }
-
-
-def run_leapcap_list(leapcap):
-    completed = subprocess.run(
-        [str(leapcap), "list"], capture_output=True, text=True, timeout=90
-    )
-    for line in completed.stdout.splitlines():
-        try:
-            event = json.loads(line)
-        except ValueError:
-            continue
-        if event.get("event") == "devices":
-            return event
-    return None
-
-
-def matches_leap(device, vendor_id, product_id):
-    unique_id = device.get("unique_id", "").lower()
-    model_id = device.get("model_id", "")
-    return (
-        unique_id.endswith(f"{vendor_id:04x}{product_id:04x}")
-        or (f"VendorID_{vendor_id}" in model_id and f"ProductID_{product_id}" in model_id)
-        or "leap" in device.get("name", "").lower()
-    )
 
 
 def check_device_visible(listing, args):

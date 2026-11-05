@@ -4,13 +4,19 @@
 // destroys the Leap's interleaved left/right bytes. This helper asks for the
 // 2-byte-per-pixel YUV layouts instead and copies the bytes untouched.
 //
-// Phase 0 commands:
+// Commands:
 //   leapcap list
 //   leapcap capture --unique-id ID --out DIR [--width 640] [--height 480]
 //                   [--pixel-format yuvs|2vuy] [--fps N] [--seconds 15]
 //                   [--every 10] [--max-frames N]
+//   leapcap stream  --unique-id ID --ring PATH [--width 640] [--height 480]
+//                   [--pixel-format yuvs|2vuy] [--fps N] [--slots 4]
+//                   [--seconds N]
 //
-// Every line on stdout is one JSON object with an "event" key.
+// `capture` saves frames to files for diagnostics. `stream` publishes every
+// frame to a shared-memory ring, and stops when stdin closes or receives
+// "stop", so it cannot outlive its parent. Every line on stdout is one JSON
+// object with an "event" key.
 //
 // Build: see ../Makefile. Camera permission belongs to the app that launches
 // this binary, so run it from Terminal.app the first time.
@@ -134,6 +140,18 @@ func pixelFormat(named name: String) -> OSType? {
     }
 }
 
+/// Report everything the session and device announce, such as runtime errors.
+func logNotifications(from object: AnyObject, source: String) {
+    _ = NotificationCenter.default.addObserver(forName: nil, object: object, queue: nil) { note in
+        emit([
+            "event": "notification",
+            "source": source,
+            "name": note.name.rawValue,
+            "info": note.userInfo.map { String(describing: $0) } ?? "",
+        ])
+    }
+}
+
 // MARK: - Arguments
 
 struct Arguments {
@@ -159,27 +177,25 @@ struct Arguments {
     }
 }
 
-// MARK: - Capture
+// MARK: - Frame delivery
 
-final class FrameSink: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
-    let outputDirectory: URL
-    let saveEvery: Int
+/// Counts frames and hands each one to a subclass on the capture queue.
+class CaptureSink: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     let maxFrames: Int
     let finished = DispatchSemaphore(value: 0)
 
     // These are touched only on the capture queue until the session stops.
     var seen = 0
-    var saved = 0
     var dropped = 0
     var firstTime: Double?
     var lastTime: Double?
     var signalled = false
 
-    init(outputDirectory: URL, saveEvery: Int, maxFrames: Int) {
-        self.outputDirectory = outputDirectory
-        self.saveEvery = saveEvery
+    init(maxFrames: Int) {
         self.maxFrames = maxFrames
     }
+
+    func handle(_ sampleBuffer: CMSampleBuffer, time: Double) {}
 
     func captureOutput(
         _ output: AVCaptureOutput,
@@ -191,9 +207,8 @@ final class FrameSink: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         if firstTime == nil { firstTime = time }
         lastTime = time
 
-        if seen == 1 || seen % saveEvery == 0 {
-            save(sampleBuffer, time: time)
-        }
+        handle(sampleBuffer, time: time)
+
         if maxFrames > 0 && seen >= maxFrames && !signalled {
             signalled = true
             finished.signal()
@@ -216,7 +231,11 @@ final class FrameSink: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         }
     }
 
-    private func save(_ sampleBuffer: CMSampleBuffer, time: Double) {
+    /// Give `body` the locked buffer's base address, or warn if its layout is unusable.
+    func withFrame(
+        _ sampleBuffer: CMSampleBuffer,
+        _ body: (UnsafeRawPointer, Int, Int, Int, OSType) -> Void
+    ) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
             emit(["event": "warning", "message": "sample buffer has no image buffer", "index": seen])
             return
@@ -228,10 +247,9 @@ final class FrameSink: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         let width = CVPixelBufferGetWidth(pixelBuffer)
         let height = CVPixelBufferGetHeight(pixelBuffer)
         let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
-        let rowBytes = width * 2
 
         guard !CVPixelBufferIsPlanar(pixelBuffer),
-              bytesPerRow >= rowBytes,
+              bytesPerRow >= width * 2,
               let base = CVPixelBufferGetBaseAddress(pixelBuffer) else {
             emit([
                 "event": "warning",
@@ -243,59 +261,187 @@ final class FrameSink: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             ])
             return
         }
+        body(UnsafeRawPointer(base), width, height, bytesPerRow, type)
+    }
+}
 
-        // Rows can carry padding, so copy them one at a time into a tight frame.
-        var data = Data(count: rowBytes * height)
-        data.withUnsafeMutableBytes { (target: UnsafeMutableRawBufferPointer) in
-            guard let destination = target.baseAddress else { return }
-            for row in 0..<height {
-                memcpy(destination + row * rowBytes, base + row * bytesPerRow, rowBytes)
+/// Saves occasional frames to files, for diagnostics.
+final class FileSink: CaptureSink {
+    let outputDirectory: URL
+    let saveEvery: Int
+    var saved = 0
+
+    init(outputDirectory: URL, saveEvery: Int, maxFrames: Int) {
+        self.outputDirectory = outputDirectory
+        self.saveEvery = saveEvery
+        super.init(maxFrames: maxFrames)
+    }
+
+    override func handle(_ sampleBuffer: CMSampleBuffer, time: Double) {
+        guard seen == 1 || seen % saveEvery == 0 else { return }
+        withFrame(sampleBuffer) { base, width, height, bytesPerRow, type in
+            let rowBytes = width * 2
+
+            // Rows can carry padding, so copy them one at a time into a tight frame.
+            var data = Data(count: rowBytes * height)
+            data.withUnsafeMutableBytes { (target: UnsafeMutableRawBufferPointer) in
+                guard let destination = target.baseAddress else { return }
+                for row in 0..<height {
+                    memcpy(destination + row * rowBytes, base + row * bytesPerRow, rowBytes)
+                }
             }
-        }
 
-        let file = outputDirectory.appendingPathComponent(String(format: "frame_%06d.raw", seen))
-        do {
-            // The atomic write means a reader never sees a half-written frame.
-            try data.write(to: file, options: .atomic)
-        } catch {
-            emit(["event": "warning", "message": "could not save frame: \(error)", "index": seen])
-            return
+            let file = outputDirectory.appendingPathComponent(String(format: "frame_%06d.raw", seen))
+            do {
+                // The atomic write means a reader never sees a half-written frame.
+                try data.write(to: file, options: .atomic)
+            } catch {
+                emit(["event": "warning", "message": "could not save frame: \(error)", "index": seen])
+                return
+            }
+            saved += 1
+            emit([
+                "event": "frame",
+                "index": seen,
+                "time": time,
+                "path": file.path,
+                "width": width,
+                "height": height,
+                "bytes_per_row": bytesPerRow,
+                "pixel_format": fourCC(type),
+            ])
         }
-        saved += 1
-        emit([
-            "event": "frame",
-            "index": seen,
-            "time": time,
-            "path": file.path,
-            "width": width,
-            "height": height,
-            "bytes_per_row": bytesPerRow,
-            "pixel_format": fourCC(type),
-        ])
     }
 }
 
-/// Report everything the session and device announce, such as runtime errors.
-func logNotifications(from object: AnyObject, source: String) {
-    _ = NotificationCenter.default.addObserver(forName: nil, object: object, queue: nil) { note in
-        emit([
-            "event": "notification",
-            "source": source,
-            "name": note.name.rawValue,
-            "info": note.userInfo.map { String(describing: $0) } ?? "",
-        ])
+/// A single-writer ring in a memory-mapped file.
+///
+/// Header (little-endian, 64 bytes):
+///   0 magic "LEAP", 4 version, 8 width, 12 height, 16 slot_bytes, 20 slot_count,
+///   24 latest_seq (u64), 32 slot_stride, 36 pixel format
+/// Each slot:
+///   0 seq_begin (u64), 8 seq_end (u64), 16 pts_ns (u64), 24 length (u32),
+///   32 payload
+///
+/// The writer sets seq_begin, then the payload, then seq_end. A reader checks
+/// seq_end before copying and seq_begin after, so an overwrite in progress can
+/// never pass as a whole frame. leapmac/ring.py is the reader.
+final class FrameRing {
+    static let headerSize = 64
+    static let slotHeaderSize = 32
+    static let version: UInt32 = 1
+
+    let base: UnsafeMutableRawPointer
+    let width: Int
+    let height: Int
+    let slotBytes: Int
+    let slotCount: Int
+    let slotStride: Int
+    private(set) var sequence: UInt64 = 0
+
+    init?(path: String, width: Int, height: Int, slotCount: Int, pixelFormat: OSType) {
+        let payloadBytes = width * height * 2
+        // Keep payloads aligned to a cache line.
+        let stride = (FrameRing.slotHeaderSize + payloadBytes + 63) & ~63
+        let totalSize = FrameRing.headerSize + slotCount * stride
+
+        self.width = width
+        self.height = height
+        self.slotCount = slotCount
+        slotBytes = payloadBytes
+        slotStride = stride
+
+        let descriptor = open(path, O_RDWR | O_CREAT | O_TRUNC, 0o600)
+        guard descriptor >= 0 else { return nil }
+        defer { close(descriptor) }
+        guard ftruncate(descriptor, off_t(totalSize)) == 0 else { return nil }
+        guard let mapped = mmap(nil, totalSize, PROT_READ | PROT_WRITE, MAP_SHARED, descriptor, 0),
+              mapped != MAP_FAILED else { return nil }
+        base = mapped
+
+        base.storeBytes(of: FrameRing.version, toByteOffset: 4, as: UInt32.self)
+        base.storeBytes(of: UInt32(width), toByteOffset: 8, as: UInt32.self)
+        base.storeBytes(of: UInt32(height), toByteOffset: 12, as: UInt32.self)
+        base.storeBytes(of: UInt32(payloadBytes), toByteOffset: 16, as: UInt32.self)
+        base.storeBytes(of: UInt32(slotCount), toByteOffset: 20, as: UInt32.self)
+        base.storeBytes(of: UInt32(stride), toByteOffset: 32, as: UInt32.self)
+        base.storeBytes(of: pixelFormat, toByteOffset: 36, as: UInt32.self)
+        // The magic goes last, so a reader never sees a half-written header.
+        OSMemoryBarrier()
+        base.storeBytes(of: UInt32(0x5041_454C), toByteOffset: 0, as: UInt32.self)
+    }
+
+    func write(_ source: UnsafeRawPointer, bytesPerRow: Int, timeNanoseconds: UInt64) {
+        sequence += 1
+        let offset = FrameRing.headerSize + Int(sequence % UInt64(slotCount)) * slotStride
+        let slot = base + offset
+        let payload = slot + FrameRing.slotHeaderSize
+        let rowBytes = width * 2
+
+        slot.storeBytes(of: sequence, toByteOffset: 0, as: UInt64.self)
+        OSMemoryBarrier()
+
+        for row in 0..<height {
+            memcpy(payload + row * rowBytes, source + row * bytesPerRow, rowBytes)
+        }
+        slot.storeBytes(of: timeNanoseconds, toByteOffset: 16, as: UInt64.self)
+        slot.storeBytes(of: UInt32(slotBytes), toByteOffset: 24, as: UInt32.self)
+
+        OSMemoryBarrier()
+        slot.storeBytes(of: sequence, toByteOffset: 8, as: UInt64.self)
+        OSMemoryBarrier()
+        base.storeBytes(of: sequence, toByteOffset: 24, as: UInt64.self)
     }
 }
 
-func runCapture(_ arguments: Arguments) -> Never {
+/// Publishes every frame to the ring.
+final class RingSink: CaptureSink {
+    let ring: FrameRing
+    var warnedAboutSize = false
+
+    init(ring: FrameRing, maxFrames: Int) {
+        self.ring = ring
+        super.init(maxFrames: maxFrames)
+    }
+
+    override func handle(_ sampleBuffer: CMSampleBuffer, time: Double) {
+        let timeNanoseconds = time.isFinite && time > 0 ? UInt64(time * 1_000_000_000) : 0
+        withFrame(sampleBuffer) { base, width, height, bytesPerRow, _ in
+            guard width == ring.width, height == ring.height else {
+                if !warnedAboutSize {
+                    warnedAboutSize = true
+                    emit([
+                        "event": "warning",
+                        "message": "frame size differs from the ring",
+                        "width": width,
+                        "height": height,
+                    ])
+                }
+                return
+            }
+            ring.write(base, bytesPerRow: bytesPerRow, timeNanoseconds: timeNanoseconds)
+        }
+    }
+}
+
+// MARK: - Capture session
+
+struct CaptureSettings {
+    let device: AVCaptureDevice
+    let format: AVCaptureDevice.Format
+    let pixelFormat: OSType
+    let formatName: String
+    let width: Int
+    let height: Int
+    let authorization: AVAuthorizationStatus
+}
+
+/// Check permission and find the device and format, failing with a clear event.
+func resolveSettings(_ arguments: Arguments) -> CaptureSettings {
     guard let uniqueID = arguments.string("--unique-id") else { fail("--unique-id is required", code: 2) }
-    guard let outputPath = arguments.string("--out") else { fail("--out is required", code: 2) }
 
     let width = arguments.int("--width", default: 640)
     let height = arguments.int("--height", default: 480)
-    let seconds = arguments.double("--seconds") ?? 15
-    let saveEvery = max(1, arguments.int("--every", default: 10))
-    let maxFrames = arguments.int("--max-frames", default: 0)
     let formatName = arguments.string("--pixel-format") ?? "yuvs"
     guard let requested = pixelFormat(named: formatName) else {
         fail("--pixel-format must be yuvs or 2vuy", code: 2)
@@ -316,18 +462,26 @@ func runCapture(_ arguments: Arguments) -> Never {
     guard let format = pickFormat(device, width: Int32(width), height: Int32(height), prefer: requested) else {
         fail("device has no \(width)x\(height) format", code: 4, extra: ["device": describe(device)])
     }
+    return CaptureSettings(
+        device: device,
+        format: format,
+        pixelFormat: requested,
+        formatName: formatName,
+        width: width,
+        height: height,
+        authorization: status
+    )
+}
 
-    let outputDirectory = URL(fileURLWithPath: outputPath, isDirectory: true)
-    do {
-        try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
-    } catch {
-        fail("could not create \(outputPath): \(error)", code: 2)
-    }
-
+func startSession(
+    _ settings: CaptureSettings,
+    arguments: Arguments,
+    sink: CaptureSink,
+    queue: DispatchQueue
+) -> AVCaptureSession {
+    let device = settings.device
     let session = AVCaptureSession()
     let output = AVCaptureVideoDataOutput()
-    let queue = DispatchQueue(label: "leapcap.capture")
-    let sink = FrameSink(outputDirectory: outputDirectory, saveEvery: saveEvery, maxFrames: maxFrames)
 
     session.beginConfiguration()
     do {
@@ -343,15 +497,15 @@ func runCapture(_ arguments: Arguments) -> Never {
 
     let available = output.availableVideoPixelFormatTypes
     let availableNames = available.map { fourCC($0) }
-    guard available.contains(requested) else {
+    guard available.contains(settings.pixelFormat) else {
         fail(
-            "output does not offer \(formatName)",
+            "output does not offer \(settings.formatName)",
             code: 4,
             extra: ["available_pixel_formats": availableNames]
         )
     }
     output.alwaysDiscardsLateVideoFrames = true
-    output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: NSNumber(value: requested)]
+    output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: NSNumber(value: settings.pixelFormat)]
     output.setSampleBufferDelegate(sink, queue: queue)
 
     // Keep the lock until the session is running, so it cannot swap the format.
@@ -360,9 +514,9 @@ func runCapture(_ arguments: Arguments) -> Never {
     } catch {
         fail("could not lock device: \(error)", code: 4)
     }
-    device.activeFormat = format
+    device.activeFormat = settings.format
     if let fps = arguments.double("--fps") {
-        let nearest = format.videoSupportedFrameRateRanges.min {
+        let nearest = settings.format.videoSupportedFrameRateRanges.min {
             abs($0.maxFrameRate - fps) < abs($1.maxFrameRate - fps)
         }
         if let range = nearest {
@@ -378,32 +532,41 @@ func runCapture(_ arguments: Arguments) -> Never {
 
     emit([
         "event": "started",
-        "requested_pixel_format": formatName,
+        "requested_pixel_format": settings.formatName,
         "available_pixel_formats": availableNames,
         "active_format": describe(device.activeFormat),
-        "authorization": authorizationName(status),
+        "authorization": authorizationName(settings.authorization),
         "session_running": session.isRunning,
     ])
+    return session
+}
 
-    // Keep the main run loop turning: parts of macOS capture may depend on it,
-    // and blocking this thread outright is a suspect in the zero-frame failure.
-    let deadline = Date(timeIntervalSinceNow: seconds)
+/// Wait for the sink to finish, the deadline to pass, or a stop request.
+func runUntilFinished(_ sink: CaptureSink, seconds: Double) {
+    // Keep the main run loop turning: parts of macOS capture may depend on it.
+    let deadline = seconds.isFinite ? Date(timeIntervalSinceNow: seconds) : Date.distantFuture
     while Date() < deadline {
         if sink.finished.wait(timeout: .now() + .milliseconds(1)) == .success {
             break
         }
         _ = RunLoop.main.run(mode: .default, before: Date(timeIntervalSinceNow: 0.05))
     }
+}
+
+func stopAndReport(
+    _ session: AVCaptureSession,
+    sink: CaptureSink,
+    queue: DispatchQueue,
+    extra: @escaping () -> [String: Any] = { [:] }
+) -> Never {
     session.stopRunning()
 
     // Waiting on the queue guarantees the delegate is idle before reading its counters.
     let summary: [String: Any] = queue.sync {
-        var values: [String: Any] = [
-            "event": "done",
-            "frames_seen": sink.seen,
-            "frames_saved": sink.saved,
-            "frames_dropped": sink.dropped,
-        ]
+        var values = extra()
+        values["event"] = "done"
+        values["frames_seen"] = sink.seen
+        values["frames_dropped"] = sink.dropped
         if let first = sink.firstTime, let last = sink.lastTime, sink.seen > 1, last > first {
             values["measured_fps"] = Double(sink.seen - 1) / (last - first)
         }
@@ -411,6 +574,62 @@ func runCapture(_ arguments: Arguments) -> Never {
     }
     emit(summary)
     exit(sink.seen > 0 ? 0 : 6)
+}
+
+// MARK: - Commands
+
+func runCapture(_ arguments: Arguments) -> Never {
+    guard let outputPath = arguments.string("--out") else { fail("--out is required", code: 2) }
+    let settings = resolveSettings(arguments)
+
+    let outputDirectory = URL(fileURLWithPath: outputPath, isDirectory: true)
+    do {
+        try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+    } catch {
+        fail("could not create \(outputPath): \(error)", code: 2)
+    }
+
+    let queue = DispatchQueue(label: "leapcap.capture")
+    let sink = FileSink(
+        outputDirectory: outputDirectory,
+        saveEvery: max(1, arguments.int("--every", default: 10)),
+        maxFrames: arguments.int("--max-frames", default: 0)
+    )
+    let session = startSession(settings, arguments: arguments, sink: sink, queue: queue)
+    runUntilFinished(sink, seconds: arguments.double("--seconds") ?? 15)
+    stopAndReport(session, sink: sink, queue: queue, extra: { ["frames_saved": sink.saved] })
+}
+
+func runStream(_ arguments: Arguments) -> Never {
+    guard let ringPath = arguments.string("--ring") else { fail("--ring is required", code: 2) }
+    let settings = resolveSettings(arguments)
+
+    guard let ring = FrameRing(
+        path: ringPath,
+        width: settings.width,
+        height: settings.height,
+        slotCount: max(2, arguments.int("--slots", default: 4)),
+        pixelFormat: settings.pixelFormat
+    ) else {
+        fail("could not create the ring at \(ringPath)", code: 2)
+    }
+
+    let queue = DispatchQueue(label: "leapcap.capture")
+    let sink = RingSink(ring: ring, maxFrames: arguments.int("--max-frames", default: 0))
+
+    // Closing stdin stops streaming, so a crashed parent can't leave the camera held.
+    let finished = sink.finished
+    DispatchQueue.global().async {
+        while let line = readLine() {
+            if line.trimmingCharacters(in: .whitespaces) == "stop" { break }
+        }
+        finished.signal()
+    }
+
+    let session = startSession(settings, arguments: arguments, sink: sink, queue: queue)
+    emit(["event": "ready", "ring": ringPath])
+    runUntilFinished(sink, seconds: arguments.double("--seconds") ?? .infinity)
+    stopAndReport(session, sink: sink, queue: queue, extra: { ["frames_published": ring.sequence] })
 }
 
 func runList() -> Never {
@@ -431,6 +650,8 @@ case "list":
     runList()
 case "capture":
     runCapture(Arguments(values: Array(commandLine.dropFirst())))
+case "stream":
+    runStream(Arguments(values: Array(commandLine.dropFirst())))
 default:
-    fail("usage: leapcap list | leapcap capture --unique-id ID --out DIR [options]", code: 2)
+    fail("usage: leapcap list | capture --unique-id ID --out DIR | stream --unique-id ID --ring PATH", code: 2)
 }

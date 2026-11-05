@@ -130,5 +130,18 @@ def test_calibration_keeps_low_bytes_and_counts_high_ones(monkeypatch):
     assert high_bytes == 1
 
 
+def test_serial_stops_at_the_first_nul(monkeypatch):
+    device = uvc_control.UvcDevice.__new__(uvc_control.UvcDevice)
+    values = list(b"LP10227151906\0")
+    monkeypatch.setattr(device, "read_registers", lambda addresses: values, raising=False)
+    assert device.read_serial() == "LP10227151906"
+
+
+def test_non_text_serial_is_treated_as_missing(monkeypatch):
+    device = uvc_control.UvcDevice.__new__(uvc_control.UvcDevice)
+    monkeypatch.setattr(device, "read_registers", lambda addresses: [0xFF] * 14, raising=False)
+    assert device.read_serial() == ""
+
+
 def test_calibration_covers_exactly_156_addresses():
     assert len(uvc_control.CALIBRATION_ADDRESSES) == 156

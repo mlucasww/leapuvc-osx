@@ -22,7 +22,7 @@ from leapmac import uvc_control  # noqa: E402
 
 DEFAULT_VID = 0xF182
 DEFAULT_PID = 0x0003
-LOW_ADDRESSES = range(0x00, 0x0E)
+LOW_ADDRESSES = uvc_control.SERIAL_ADDRESSES
 
 
 def parse_args():

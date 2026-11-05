@@ -43,6 +43,9 @@ TIMEOUT_MS = 1000
 CALIBRATION_ADDRESSES = range(100, 256)
 CALIBRATION_DELAY_S = 0.004
 
+# Registers that hold what looks like an ASCII serial number. leapd reads these.
+SERIAL_ADDRESSES = range(0x00, 0x0E)
+
 # Name: (unit kind, selector). All of these controls are 2 bytes long.
 CONTROLS = {
     "exposure": ("camera", 0x0B),  # CT_ZOOM_ABSOLUTE
@@ -398,6 +401,13 @@ class UvcDevice:
         values = self.read_registers(CALIBRATION_ADDRESSES)
         high_bytes_seen = sum(1 for value in values if value > 0xFF)
         return bytes(value & 0xFF for value in values), high_bytes_seen
+
+    def read_serial(self):
+        """Return the ASCII text at the serial registers, or "" if there is none."""
+        values = self.read_registers(SERIAL_ADDRESSES)
+        text = bytes(value & 0xFF for value in values).split(b"\0")[0]
+        decoded = text.decode("ascii", errors="ignore")
+        return decoded if decoded.isalnum() else ""
 
     def read_registers(self, addresses):
         """Read through the sharpness/saturation channel. This sends no data writes.

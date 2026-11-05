@@ -130,6 +130,20 @@ class leapImageThread(threading.Thread):
 
 def retrieveLeapCalibration(cap, resolution):
     '''Retrieves the device calibration and calculates OpenCV distortion parameters.  (resolution) -> (calibrationDict)'''
+    # Begin the property knocking routine
+    calibrationBytes = []
+    for i in range(100, 256):
+        # 1) Set the Sharpness Value to the address in memory
+        cap.set(cv2.CAP_PROP_SHARPNESS, i)
+        # 2) Wait 4ms
+        cv2.waitKey(4)
+        # 3) Read the Saturation Value
+        calibrationBytes.append(int(cap.get(cv2.CAP_PROP_SATURATION)))
+
+    return parseLeapCalibration(bytes(calibrationBytes), resolution)
+
+def parseLeapCalibration(calibrationBytes, resolution):
+    '''Calculates OpenCV distortion parameters from the raw calibration bytes.  (calibrationBytes, resolution) -> (calibrationDict)'''
     def normalWarp(r, k1, k2, k3, k4, k5, k6):
         '''The standard OpenCV Radial Distortion Function'''
         return ((1.0 + r*(k1 + r*(k2 + r*k3))) /
@@ -145,16 +159,6 @@ def retrieveLeapCalibration(cap, resolution):
         kr = normalWarp(r, k1, k2, k3, k4, k5, k6)
         return r * (kr**2)
 
-    # Begin the property knocking routine
-    calibrationBytes = []
-    for i in range(100, 256):
-        # 1) Set the Sharpness Value to the address in memory
-        cap.set(cv2.CAP_PROP_SHARPNESS, i)
-        # 2) Wait 4ms
-        cv2.waitKey(4)
-        # 3) Read the Saturation Value
-        calibrationBytes.append(int(cap.get(cv2.CAP_PROP_SATURATION)))
-
     # 5) Convert the Raw Bytes into Raw Values
     # Sig, Sig, Ver, Score, Timestamp, Baseline, Q2Init
     # Left:  FocalLength, Offset^2, Tangential^2, Radial^6
@@ -163,11 +167,11 @@ def retrieveLeapCalibration(cap, resolution):
     # Right: FocalLength, x0, y0, CayleyRotation^3
     # Checksum
     # 'B B B B I ff fffffffffff ffffff fffffffffff ffffff I'
-    calibrationArray = struct.unpack('BBBBIffffffffffffffffffffffffffffffffffffI', bytes(calibrationBytes))
+    calibrationArray = struct.unpack('BBBBIffffffffffffffffffffffffffffffffffffI', calibrationBytes)
 
     # 6) Store raw values in a named dict
     cameras = ['left', 'right']
-    calibration = {}
+    calibration = {"baseline": calibrationArray[5]}
     byteOffset = 7
     for cam in cameras:
         calibration[cam] = {}
@@ -201,14 +205,14 @@ def retrieveLeapCalibration(cap, resolution):
         calibration[cam]["intrinsics"]["inverseRadial"] = np.asarray(k)
 
         # Construct the OpenCV "distCoeffs" array, used for rectification!
-        p = calibration["left"]["intrinsics"]["tangential"]
+        p = calibration[cam]["intrinsics"]["tangential"]
         distCoeffs = np.asarray([k[0], k[1], p[0], p[1], k[2], k[3], k[4], k[5]], dtype=np.float32)
         calibration[cam]["intrinsics"]["distCoeffs"] = distCoeffs
 
         # Construct Undistortion Maps (for convenience)
         calibration[cam]["extrinsics"]["r"] = CayleyTransform(-np.asarray(calibration[cam]["extrinsics"]["rotation"]))
         calibration[cam]["undistortMaps"] = [None, None]
-        calibration[cam]["undistortMaps"][0], calibration[cam]["undistortMaps"][1] = cv2.initUndistortRectifyMap(cameraMatrix, distCoeffs, calibration[cam]["extrinsics"]["r"], None, resolution, cv2.CV_8UC1 )
+        calibration[cam]["undistortMaps"][0], calibration[cam]["undistortMaps"][1] = cv2.initUndistortRectifyMap(cameraMatrix, distCoeffs, calibration[cam]["extrinsics"]["r"], None, resolution, cv2.CV_16SC2 )
 
     return calibration
 
