@@ -70,9 +70,15 @@ def command_trackbar(args):
     calls = []
     cv2.namedWindow("Trackbar check")
     cv2.createTrackbar("Value", "Trackbar check", 7, 16, calls.append)
+    # This matches the example's Rectify slider, which it reads on every frame.
+    cv2.createTrackbar("Rectify", "Trackbar check", 0, 1, lambda value: 0)
     calls_after_create = list(calls)
     for _ in range(30):
         cv2.waitKey(10)
+    positions = {
+        "Value, created at 7": cv2.getTrackbarPos("Value", "Trackbar check"),
+        "Rectify, created at 0": cv2.getTrackbarPos("Rectify", "Trackbar check"),
+    }
     cv2.destroyAllWindows()
     save(
         args,
@@ -81,6 +87,7 @@ def command_trackbar(args):
             "opencv": cv2.__version__,
             "calls_after_create": calls_after_create,
             "calls_after_event_loop": calls,
+            "positions": positions,
         },
     )
 
