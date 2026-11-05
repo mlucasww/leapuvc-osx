@@ -55,7 +55,7 @@ Still to fix in Phase 2: `parseLeapCalibration` rectifies each camera to its own
 | Phase | Status |
 |---|---|
 | 0. Prove the path on hardware | Done: Path A confirmed |
-| 1. Capture and control port | Code written, not yet run |
+| 1. Capture and control port | Done |
 | 2. Metric stereo | Not started |
 | 3. Live point cloud | Not started |
 | 4. Camera mount | Not started |
@@ -208,6 +208,20 @@ The macOS library now clamps digital gain to the device's range of 4 to 15. An e
 | HDR | On gave 49 against 77, and left and right brightness matched |
 
 **Rectification works here.** Maps are sensible, with the centre pixel moving only a few pixels and 97% of output covered. Rectified images are recognisable and straightened. The black result in upstream issue #17 didn't reproduce, though metric accuracy is still untested until Phase 2.
+
+### Phase 1 result, 2026-11-04
+
+Phase 1 is complete at commit `1b71a2d`. All 88 unit tests pass, and both exit checks are met:
+
+- **`minimumExample` and `cameraControlExample` run unedited.** Images are clear from the first frame, and every slider works. Rectify stayed clear, and quitting left no helper running.
+- **The 10-minute soak was clean,** before the control fixes. A 10-second run after them was also clean, at 57.55 FPS with settings correctly reset.
+
+**Open items to carry forward:**
+
+- **The first frame can report an old exposure.** One frame after a reset read 20 before settling at 300. Anything using per-frame exposure should skip the first frame.
+- **The earlier black image isn't fully closed.** That run ended at digital gain 7, which should show a picture, and we don't know whether it recovered at the time. The fixed run never went black, which argues against a second cause without proving it.
+- **The soak predates the control fixes.** They only touch startup and value limits, but the 10-minute run wasn't repeated.
+- **`stereoExample` hasn't been run on macOS.** Phase 2 replaces its role.
 
 ## Sources
 
