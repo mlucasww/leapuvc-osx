@@ -2,7 +2,7 @@
 
 This folder is the Apple Silicon port of LeapUVC. The goal is a live 3D point cloud from an unlocked Leap Motion Controller, to help judge scene layout for a mirrorless camera.
 
-**Status:** Phase 0. Controls and calibration work without root, but the Leap isn't sending video yet. The bring-up test below is the next step.
+**Status:** Phase 0. Controls and calibration work without root, but the Leap hasn't sent any video on macOS, even after a bring-up replay. The next step is to confirm whether this unit streams at all on Windows or Linux.
 
 Design notes and results are in [docs/macos-port.md](../docs/macos-port.md).
 
@@ -81,7 +81,9 @@ If the Leap isn't found, the probe lists every USB device in `report.json`. Run 
 
 ## Test a bring-up sequence
 
-The first probe found that the Leap accepts controls but sends no video. This test replays a recorded sequence of control writes to find out whether that wakes it. Try one scenario at a time, from Terminal.app, with no root:
+The first probe found that the Leap accepts controls but sends no video. This test replays a recorded sequence of control writes to find out whether that wakes it. All three scenarios have already failed on our test unit, so don't rerun them without a specific reason. The sequence writes bytes to device registers that may be persistent, as the [notes on it](third_party/openmotion/README.md) explain.
+
+Each scenario runs from Terminal.app, with no root:
 
 ```bash
 .venv/bin/python tools/bringup_test.py before
@@ -108,4 +110,5 @@ Results go to `probe_out/bringup-<scenario>-<timestamp>/`. The sequence comes fr
 | `leapmac/bringup.py` | Parses and replays recorded control writes |
 | `tools/probe_leap.py` | The hardware probe |
 | `tools/bringup_test.py` | Tests whether a bring-up wakes the video stream |
+| `tools/read_registers.py` | Reads known-safe registers and checks calibration against a backup |
 | `third_party/openmotion/` | The recorded sequence and its licence |

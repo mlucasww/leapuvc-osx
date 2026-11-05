@@ -96,6 +96,20 @@ Tested on macOS 15.8.1, arm64, with the Leap connected directly at USB 2.0 high 
 
 **Probe flaw found:** it recommended Path C because zero frames counted as a failure, though nothing showed AVFoundation was at fault. It now reports that as undecided.
 
+### Bring-up replay, 2026-11-04
+
+OpenMotion's 358 recorded control writes were replayed before capture, during capture, and around a USB reset. Every write reported success, and none of the three runs produced a packet.
+
+- **Negotiation matches the recording.** During capture, the device's commit state matched the recorded commit from byte 2 on, and the stream error code stayed 0. macOS's own commit reaches the device, so negotiation isn't the obvious gap.
+- **IR LEDs glowed in all three runs.** This hasn't been compared with a capture without a replay, so the replay isn't proven to be the cause.
+- **macOS intercepts `SET_INTERFACE`.** The kernel logs "intercepting manually crafted SET_INTERFACE request", and libusb reports success, so those rows may not have reached the device as recorded.
+- **`libusb_reset_device` works without root.** The Leap re-enumerated and was reopened.
+- **`dwMaxVideoFrameSize` of 721920 is normal.** The recorded commit carries the same value.
+
+**The replay is probably the wrong tool for this unit.** The sequence writes 16 high-entropy bytes through the saturation control to addresses 16 to 19, 32 to 39 and 44 to 47. The wtfuzz recording writes different bytes to the same addresses, which suggests an authentication response tied to one device or session. OpenMotion's regression, with LEDs lit and no bulk data, also matches what we saw.
+
+**Correction:** before the replay we described the worst case as a crash that a replug clears. That wasn't established, because nobody knows whether those addresses are persistent. The replay should not be repeated without a specific reason.
+
 ## Sources
 
 - [OpenCV AVFoundation backend](https://github.com/opencv/opencv/blob/master/modules/videoio/src/cap_avfoundation_mac.mm)

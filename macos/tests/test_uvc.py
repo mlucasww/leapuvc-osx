@@ -106,5 +106,29 @@ def test_vertical_zoom_is_not_exposed():
     assert all(getattr(uvc_control, name) != 6 for name in constants)
 
 
+def test_read_registers_selects_each_address_then_reads_it(monkeypatch):
+    monkeypatch.setattr(uvc_control, "CALIBRATION_DELAY_S", 0)
+    device = uvc_control.UvcDevice.__new__(uvc_control.UvcDevice)
+    selected = []
+    device.set = lambda name, value: selected.append((name, value))
+    device.get = lambda name: selected[-1][1] + 1
+
+    assert device.read_registers([3, 9]) == [4, 10]
+    assert selected == [("sharpness", 3), ("sharpness", 9)]
+
+
+def test_calibration_keeps_low_bytes_and_counts_high_ones(monkeypatch):
+    device = uvc_control.UvcDevice.__new__(uvc_control.UvcDevice)
+    values = [0x0102] + [0x10] * 155
+    monkeypatch.setattr(device, "read_registers", lambda addresses: values, raising=False)
+
+    blob, high_bytes = device.read_calibration_bytes()
+
+    assert blob[0] == 0x02
+    assert blob[1] == 0x10
+    assert len(blob) == 156
+    assert high_bytes == 1
+
+
 def test_calibration_covers_exactly_156_addresses():
     assert len(uvc_control.CALIBRATION_ADDRESSES) == 156

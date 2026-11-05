@@ -395,10 +395,19 @@ class UvcDevice:
         Returns (blob, high_bytes_seen). The second value is the number of
         reads that carried a nonzero high byte, which would be unexpected.
         """
+        values = self.read_registers(CALIBRATION_ADDRESSES)
+        high_bytes_seen = sum(1 for value in values if value > 0xFF)
+        return bytes(value & 0xFF for value in values), high_bytes_seen
+
+    def read_registers(self, addresses):
+        """Read through the sharpness/saturation channel. This sends no data writes.
+
+        Selecting an address is itself a control write, and some addresses may
+        act as commands, so only pass addresses known to be safe to select.
+        """
         values = []
-        for address in CALIBRATION_ADDRESSES:
+        for address in addresses:
             self.set("sharpness", address)
             time.sleep(CALIBRATION_DELAY_S)
             values.append(self.get("saturation"))
-        high_bytes_seen = sum(1 for value in values if value > 0xFF)
-        return bytes(value & 0xFF for value in values), high_bytes_seen
+        return values
