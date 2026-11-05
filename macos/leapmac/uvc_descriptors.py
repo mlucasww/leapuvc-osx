@@ -41,6 +41,7 @@ class UvcFormat:
 @dataclass
 class UvcTopology:
     vc_interface: int = None
+    vs_interface: int = None
     camera_terminal: int = None
     processing_unit: int = None
     extension_units: list = field(default_factory=list)
@@ -101,6 +102,12 @@ def parse_configuration(blob):
                 and topology.vc_interface is None
             ):
                 topology.vc_interface = descriptor[2]
+            if (
+                interface_class == CLASS_VIDEO
+                and interface_subclass == SUBCLASS_VIDEO_STREAMING
+                and topology.vs_interface is None
+            ):
+                topology.vs_interface = descriptor[2]
             continue
 
         if kind != DESCRIPTOR_CS_INTERFACE or interface_class != CLASS_VIDEO or length < 4:

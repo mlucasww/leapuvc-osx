@@ -32,6 +32,12 @@ GET_MIN = 0x82
 GET_MAX = 0x83
 GET_DEF = 0x87
 
+# UVC 1.0 VideoStreaming controls, addressed to the streaming interface
+VS_PROBE_CONTROL = 0x01
+VS_COMMIT_CONTROL = 0x02
+VS_STREAM_ERROR_CODE_CONTROL = 0x06
+VS_CONTROL_LENGTH = 26
+
 TIMEOUT_MS = 1000
 
 CALIBRATION_ADDRESSES = range(100, 256)
@@ -115,6 +121,7 @@ def _bind(lib):
         ("libusb_get_device_descriptor", c_int, [c_void_p, POINTER(_DeviceDescriptor)]),
         ("libusb_open", c_int, [c_void_p, POINTER(c_void_p)]),
         ("libusb_close", None, [c_void_p]),
+        ("libusb_reset_device", c_int, [c_void_p]),
         (
             "libusb_control_transfer",
             c_int,
@@ -336,6 +343,43 @@ class UvcDevice:
         address, index = self._control_address(name)
         buffer = (c_ubyte * 2)(value & 0xFF, (value >> 8) & 0xFF)
         self._transfer(REQUEST_TYPE_CLASS_OUT, SET_CUR, address, index, buffer, 2, f"SET {name}")
+
+    def write_raw(self, request_type, request, value, index, data=b""):
+        """Send one control write exactly as given, for replaying recorded traffic."""
+        buffer = (c_ubyte * len(data))(*data)
+        self._transfer(request_type, request, value, index, buffer, len(data), "raw control write")
+
+    def reset(self):
+        """Ask for a USB reset. The device may re-enumerate, so reopen it afterwards."""
+        self.usb.check(self.usb.lib.libusb_reset_device(self.handle), "libusb_reset_device")
+
+    def read_stream_state(self):
+        """Read the device's negotiated streaming state over endpoint 0.
+
+        Failures are returned as text, because a refused read is itself evidence.
+        """
+        state = {}
+        requests = (
+            ("commit", VS_COMMIT_CONTROL, VS_CONTROL_LENGTH),
+            ("probe", VS_PROBE_CONTROL, VS_CONTROL_LENGTH),
+            ("stream_error", VS_STREAM_ERROR_CODE_CONTROL, 1),
+        )
+        for name, selector, length in requests:
+            buffer = (c_ubyte * length)()
+            try:
+                received = self._transfer(
+                    REQUEST_TYPE_CLASS_IN,
+                    GET_CUR,
+                    selector << 8,
+                    self.topology.vs_interface,
+                    buffer,
+                    length,
+                    f"GET {name}",
+                )
+                state[name] = bytes(buffer[:received]).hex()
+            except LibusbError as error:
+                state[name] = str(error)
+        return state
 
     def set_contrast_field(self, selector, value):
         """Set one field of the multiplexed contrast control."""

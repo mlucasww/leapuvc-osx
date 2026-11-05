@@ -414,16 +414,40 @@ def check_bytes(steps, requested_size, findings):
 
 
 def start_capture(args, unique_id, directory):
-    """Start streaming, trying yuvs and then 2vuy. Returns (run, pixel_format)."""
+    """Start streaming, trying yuvs and then 2vuy.
+
+    Returns (run, pixel_format, failed_attempts). A failed attempt runs to its
+    end, so the helper still reports its dropped-frame counts and warnings.
+    """
     run = None
+    attempts = []
     for pixel_format in ("yuvs", "2vuy"):
         run = CaptureRun(args.leapcap, unique_id, args.width, args.height, pixel_format, directory)
         run.start()
         if run.wait_for_frame(timeout=FIRST_FRAME_TIMEOUT_S):
-            return run, pixel_format
-        run.process.terminate()
+            return run, pixel_format, attempts
         run.finish()
-    return run, None
+        attempts.append({"pixel_format": pixel_format, "events": run.events})
+    return run, None, attempts
+
+
+def check_failed_capture(attempts):
+    """Judge a capture with no frames. Only a reported error counts as a failure."""
+    errors = [
+        event
+        for attempt in attempts
+        for event in attempt["events"]
+        if event.get("event") == "error"
+    ]
+    if any("authorization" in error for error in errors):
+        return result(BLOCKED, f"Could not stream: {errors[-1]['message']}", attempts=attempts)
+    if len(errors) == len(attempts):
+        return result(FAIL, f"Could not stream: {errors[-1]['message']}", attempts=attempts)
+    return result(
+        INCONCLUSIVE,
+        "The session started but delivered no frames. See the helper events in report.json.",
+        attempts=attempts,
+    )
 
 
 def write_report(directory, report):
@@ -521,14 +545,11 @@ def run_probe(args, directory, usb):
     frames_directory = directory / "frames"
     samples_directory = directory / "samples"
     samples_directory.mkdir()
-    run, pixel_format = start_capture(args, found["unique_id"], frames_directory)
+    run, pixel_format, attempts = start_capture(args, found["unique_id"], frames_directory)
     report["capture"] = {"pixel_format": pixel_format, "started": run.event("started")}
 
     if pixel_format is None:
-        problem = run.event("error")
-        message = problem["message"] if problem else "leapcap produced no frames"
-        status = BLOCKED if problem and "authorization" in problem else FAIL
-        checks["1. device visible"] = result(status, f"Could not stream: {message}", leapcap_error=problem)
+        checks["1. device visible"] = check_failed_capture(attempts)
         return report
 
     try:

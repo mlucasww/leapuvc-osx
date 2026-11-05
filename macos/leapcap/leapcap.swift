@@ -206,6 +206,14 @@ final class FrameSink: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         from connection: AVCaptureConnection
     ) {
         dropped += 1
+        if dropped == 1 {
+            let reason = CMGetAttachment(
+                sampleBuffer,
+                key: kCMSampleBufferAttachmentKey_DroppedFrameReason,
+                attachmentModeOut: nil
+            )
+            emit(["event": "first_drop", "reason": reason.map { String(describing: $0) } ?? "unknown"])
+        }
     }
 
     private func save(_ sampleBuffer: CMSampleBuffer, time: Double) {
@@ -263,6 +271,18 @@ final class FrameSink: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             "height": height,
             "bytes_per_row": bytesPerRow,
             "pixel_format": fourCC(type),
+        ])
+    }
+}
+
+/// Report everything the session and device announce, such as runtime errors.
+func logNotifications(from object: AnyObject, source: String) {
+    _ = NotificationCenter.default.addObserver(forName: nil, object: object, queue: nil) { note in
+        emit([
+            "event": "notification",
+            "source": source,
+            "name": note.name.rawValue,
+            "info": note.userInfo.map { String(describing: $0) } ?? "",
         ])
     }
 }
@@ -351,6 +371,8 @@ func runCapture(_ arguments: Arguments) -> Never {
         }
     }
     session.commitConfiguration()
+    logNotifications(from: session, source: "session")
+    logNotifications(from: device, source: "device")
     session.startRunning()
     device.unlockForConfiguration()
 
@@ -363,7 +385,15 @@ func runCapture(_ arguments: Arguments) -> Never {
         "session_running": session.isRunning,
     ])
 
-    _ = sink.finished.wait(timeout: .now() + .milliseconds(Int(seconds * 1000)))
+    // Keep the main run loop turning: parts of macOS capture may depend on it,
+    // and blocking this thread outright is a suspect in the zero-frame failure.
+    let deadline = Date(timeIntervalSinceNow: seconds)
+    while Date() < deadline {
+        if sink.finished.wait(timeout: .now() + .milliseconds(1)) == .success {
+            break
+        }
+        _ = RunLoop.main.run(mode: .default, before: Date(timeIntervalSinceNow: 0.05))
+    }
     session.stopRunning()
 
     // Waiting on the queue guarantees the delegate is idle before reading its counters.

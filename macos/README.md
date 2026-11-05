@@ -2,7 +2,7 @@
 
 This folder is the Apple Silicon port of LeapUVC. The goal is a live 3D point cloud from an unlocked Leap Motion Controller, to help judge scene layout for a mirrorless camera.
 
-**Status:** Phase 0. The code here has not been compiled or run yet. The next step is the probe below, which finds out whether the Leap works on this capture path.
+**Status:** Phase 0. Controls and calibration work without root, but the Leap isn't sending video yet. The bring-up test below is the next step.
 
 Design notes and results are in [docs/macos-port.md](../docs/macos-port.md).
 
@@ -79,6 +79,22 @@ If the Leap isn't found, the probe lists every USB device in `report.json`. Run 
 .venv/bin/python tools/probe_leap.py --vid 0xf182 --pid 0x0003
 ```
 
+## Test a bring-up sequence
+
+The first probe found that the Leap accepts controls but sends no video. This test replays a recorded sequence of control writes to find out whether that wakes it. Try one scenario at a time, from Terminal.app, with no root:
+
+```bash
+.venv/bin/python tools/bringup_test.py before
+```
+
+| Scenario | What it does |
+|---|---|
+| `before` | Replays every row, then starts capture |
+| `during` | Starts capture so reads are pending, then replays every row |
+| `reset` | Replays up to the recorded reset, resets the device, replays the rest, then captures |
+
+Results go to `probe_out/bringup-<scenario>-<timestamp>/`. The sequence comes from [OpenMotion](third_party/openmotion/README.md).
+
 ## Layout
 
 | Path | Purpose |
@@ -89,4 +105,7 @@ If the Leap isn't found, the probe lists every USB device in `report.json`. Run 
 | `leapmac/uvc_control.py` | UVC controls through libusb |
 | `leapmac/calibration_blob.py` | Calibration blob parsing |
 | `leapmac/probe_decision.py` | Chooses a capture path from the check results |
+| `leapmac/bringup.py` | Parses and replays recorded control writes |
 | `tools/probe_leap.py` | The hardware probe |
+| `tools/bringup_test.py` | Tests whether a bring-up wakes the video stream |
+| `third_party/openmotion/` | The recorded sequence and its licence |

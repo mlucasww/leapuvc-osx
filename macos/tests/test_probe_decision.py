@@ -33,6 +33,12 @@ def test_blocked_never_selects_a_fallback():
     assert decision["open_checks"] == ["1. device visible"]
 
 
+def test_unexplained_zero_frames_never_selects_a_fallback():
+    decision = decide(INCONCLUSIVE, "skipped", "skipped", PASS)
+    assert decision["path"] is None
+    assert decision["open_checks"] == ["1. device visible"]
+
+
 def test_inconclusive_results_are_flagged_as_provisional():
     decision = decide(PASS, INCONCLUSIVE, PASS, PASS)
     assert decision["path"] == "A"

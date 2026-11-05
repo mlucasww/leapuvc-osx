@@ -52,7 +52,7 @@ These will be fixed in Phase 1:
 
 | Phase | Status |
 |---|---|
-| 0. Prove the path on hardware | Code written, not yet run |
+| 0. Prove the path on hardware | In progress: controls work, no frames yet |
 | 1. Capture and control port | Not started |
 | 2. Metric stereo | Not started |
 | 3. Live point cloud | Not started |
@@ -61,7 +61,40 @@ These will be fixed in Phase 1:
 
 ## Results
 
-No hardware results yet. Probe findings, measured frame rates and the depth error table will go here.
+### First hardware run, 2026-11-04
+
+Tested on macOS 15.8.1, arm64, with the Leap connected directly at USB 2.0 high speed.
+
+**Working without root:**
+
+- `leapcap` builds cleanly, and all 34 unit tests pass.
+- Calibration reads identically twice, using endpoint 0 control requests with no interface claimed.
+- Baseline is 39.87 mm. Focal lengths are 133.8 px (left) and 134.2 px (right).
+- AVFoundation lists the Leap with `yuvs` at every resolution. Its unique ID encodes the USB location, so it changes between ports.
+
+**Device-reported modes:**
+
+| Resolution | Maximum FPS |
+|---|---|
+| 640×480 | 57.5 |
+| 640×240 | 115 |
+| 640×120 | 214 |
+| 752×480 | 50 |
+| 752×240 | 100 |
+| 752×120 | 190 |
+
+**Not working: no frames.** The AVFoundation session starts and macOS's UVC driver reads the stream, but it logs `TotalPackets: 0`. The Leap isn't sending anything, so neither `leapcap` nor Apple's frame processing is dropping data. This held across five streams, at 640×480 and 640×120, and after a clean replug into a different port with no libusb access.
+
+**Device details learned:**
+
+- The streaming interface is **bulk**, on endpoint `0x83` with 512-byte packets and alternate setting 0, not isochronous.
+- `dwMaxVideoFrameSize` reads 721920 for every mode, and `dwClockFrequency` reads 0.
+- `bcdDevice` is 0, so the descriptors don't reveal the firmware version.
+- Units: camera terminal 2, processing unit 5, extension unit 6.
+
+**Likely cause, not yet proven:** the OpenMotion project reports this same device (`f182:0003`, firmware 1.7.0) boots inert, with the same symptoms, until a sequence of control writes brings it up. Those writes travel on endpoint 0, which we've shown works without root. The manual says firmware before 1.7.1 needs authentication, so a device that isn't actually unlocked would behave like this. OpenMotion also reports a later regression where the same replay lit the LEDs but returned no bulk data, so bring-up alone may not be enough.
+
+**Probe flaw found:** it recommended Path C because zero frames counted as a failure, though nothing showed AVFoundation was at fault. It now reports that as undecided.
 
 ## Sources
 
@@ -70,3 +103,5 @@ No hardware results yet. Probe findings, measured frame rates and the depth erro
 - [libusb darwin backend](https://github.com/libusb/libusb/blob/master/libusb/os/darwin_usb.c)
 - [CameraController](https://github.com/itaybre/CameraController)
 - [purethermal1-uvc-capture issue #56](https://github.com/groupgets/purethermal1-uvc-capture/issues/56)
+- [OpenMotion](https://github.com/coleman-sagil/OpenMotion)
+- [wtfuzz/leapuvc](https://github.com/wtfuzz/leapuvc)

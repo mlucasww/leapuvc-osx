@@ -7,7 +7,8 @@ Each check ends as one of:
   blocked       something outside the test stopped it, such as camera permission
 
 Only `fail` selects a fallback. A permission problem must never push the
-project onto the root-only path.
+project onto the root-only path, and neither must an unexplained capture with
+no frames, which could just as easily be a bug in our own helper.
 """
 
 PASS = "pass"
@@ -31,6 +32,13 @@ def decide(device_visible, bytes_intact, controls_work, calibration_valid):
             "path": None,
             "summary": "Blocked. Fix the reported problem and run the probe again.",
             "open_checks": blocked,
+        }
+
+    if device_visible == INCONCLUSIVE:
+        return {
+            "path": None,
+            "summary": "Undecided. Streaming started but delivered no frames, which needs diagnosing first.",
+            "open_checks": ["1. device visible"],
         }
 
     if device_visible == FAIL or bytes_intact == FAIL:
