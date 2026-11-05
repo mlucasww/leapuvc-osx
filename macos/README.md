@@ -2,14 +2,14 @@
 
 This folder is the Apple Silicon port of LeapUVC. The goal is a live 3D point cloud from an unlocked Leap Motion Controller, to help judge scene layout for a mirrorless camera.
 
-**Status:** Phase 0. Controls and calibration work without root, but the Leap hasn't sent any video on macOS, even after a bring-up replay. The next step is to confirm whether this unit streams at all on Windows or Linux.
+**Status:** Phase 0. Controls, calibration and capture all work without root on an unlocked Leap. Byte integrity is being checked with the hardware probe.
 
 Design notes and results are in [docs/macos-port.md](../docs/macos-port.md).
 
 ## What you need
 
 - A Mac running macOS Sequoia on Apple Silicon
-- An unlocked Leap Motion Controller, plugged in directly rather than through a hub. Unlocking needs the Windows tools in this repo.
+- An unlocked Leap Motion Controller, plugged in directly rather than through a hub. On Windows, right-click `LeapUVC Firmware Tools/UnlockDevice.exe` and choose **Run as administrator**. Without that, it can exit quietly and change nothing. The Windows Camera app then confirms the unlock: it should show an image, usually green and magenta. A locked Leap still accepts controls and returns calibration, but it never sends video.
 - Xcode Command Line Tools, Homebrew and Python 3.11 or later
 
 Quit any other software that might use the camera, including Leap or Ultraleap services.
@@ -81,7 +81,7 @@ If the Leap isn't found, the probe lists every USB device in `report.json`. Run 
 
 ## Test a bring-up sequence
 
-The first probe found that the Leap accepts controls but sends no video. This test replays a recorded sequence of control writes to find out whether that wakes it. All three scenarios have already failed on our test unit, so don't rerun them without a specific reason. The sequence writes bytes to device registers that may be persistent, as the [notes on it](third_party/openmotion/README.md) explain.
+You shouldn't need this. It was written to find out whether a recorded sequence of control writes could wake a silent Leap, and all three scenarios failed on our test unit. The real cause was that the unit hadn't been unlocked, so check that first, and don't rerun these without a specific reason. The sequence writes bytes to device registers that may be persistent, as the [notes on it](third_party/openmotion/README.md) explain.
 
 Each scenario runs from Terminal.app, with no root:
 

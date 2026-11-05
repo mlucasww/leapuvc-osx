@@ -40,7 +40,8 @@ from leapmac.probe_decision import BLOCKED, FAIL, INCONCLUSIVE, PASS, decide  # 
 DEFAULT_VID = 0xF182
 DEFAULT_PID = 0x0003
 
-CAPTURE_SECONDS = 15
+# Long enough for slow first-time imports and USB opens, as well as every step.
+CAPTURE_SECONDS = 30
 SAVE_EVERY = 5
 FIRST_FRAME_TIMEOUT_S = 10
 SETTLE_S = 0.6
@@ -290,12 +291,15 @@ def run_control_sequence(device, run, samples_directory, keep_images):
     errors = {}
 
     def step(label, action=None):
+        started = time.monotonic()
         if action is not None:
             try:
                 action()
             except (uvc_control.LibusbError, ValueError) as error:
                 errors[label] = str(error)
+        action_seconds = time.monotonic() - started
         steps[label] = sample(run, samples_directory, label, keep_images)
+        steps[label]["action_seconds"] = round(action_seconds, 3)
 
     original = {}
     for name in ("exposure", "gain"):
@@ -402,12 +406,17 @@ def check_bytes(steps, requested_size, findings):
     if min(stats["left_std"], stats["right_std"]) < MIN_SCENE_STD:
         return result(INCONCLUSIVE, "The scene is too flat to judge. Aim the Leap at something detailed.", **evidence)
 
-    metadata_ok = findings["gain_plain_form_works"] or findings["gain_selector_form_works"]
+    # Exact values landing in the last 12 bytes show those bytes arrive unaltered.
+    metadata_ok = (
+        findings["gain_plain_form_works"]
+        or findings["gain_selector_form_works"]
+        or findings["exposure_metadata_matches_microseconds"]
+    )
     stereo_ok = stats["best_correlation"] >= MIN_STEREO_CORRELATION
     if not stereo_ok:
         return result(FAIL, "The second image does not match the first as a stereo pair.", **evidence)
     if not metadata_ok:
-        return result(INCONCLUSIVE, "The images match as a stereo pair, but metadata did not follow gain.", **evidence)
+        return result(INCONCLUSIVE, "The images match as a stereo pair, but metadata did not follow the controls.", **evidence)
     if not full_range_seen:
         return result(INCONCLUSIVE, "No values outside 16 to 235, so macOS may be converting the range.", **evidence)
     return result(PASS, "Metadata follows the controls, and the images match as a stereo pair.", **evidence)
@@ -542,16 +551,7 @@ def run_probe(args, directory, usb):
         checks["4. calibration valid"] = attempt_calibration(device, directory)
         device.close()
 
-    frames_directory = directory / "frames"
-    samples_directory = directory / "samples"
-    samples_directory.mkdir()
-    run, pixel_format, attempts = start_capture(args, found["unique_id"], frames_directory)
-    report["capture"] = {"pixel_format": pixel_format, "started": run.event("started")}
-
-    if pixel_format is None:
-        checks["1. device visible"] = check_failed_capture(attempts)
-        return report
-
+    # Import before streaming, because the first import can take many seconds.
     try:
         import cv2  # noqa: F401
 
@@ -559,13 +559,28 @@ def run_probe(args, directory, usb):
     except ImportError:
         keep_images = False
 
+    frames_directory = directory / "frames"
+    samples_directory = directory / "samples"
+    samples_directory.mkdir()
+    capture_started = time.monotonic()
+    run, pixel_format, attempts = start_capture(args, found["unique_id"], frames_directory)
+    report["capture"] = {"pixel_format": pixel_format, "started": run.event("started")}
+
+    if pixel_format is None:
+        checks["1. device visible"] = check_failed_capture(attempts)
+        return report
+
+    timing = {"first_frame_seconds": round(time.monotonic() - capture_started, 3)}
+    report["capture"]["timing"] = timing
     device, error = open_quietly(usb, args)
+    timing["usb_open_seconds"] = round(time.monotonic() - capture_started, 3)
     if device is None:
         # Frames can still be judged even though controls cannot be reached.
         steps = {"baseline": sample(run, samples_directory, "baseline", keep_images)}
         errors, original = {"open_during_streaming": error}, {}
     else:
         steps, errors, original = run_control_sequence(device, run, samples_directory, keep_images)
+    timing["controls_done_seconds"] = round(time.monotonic() - capture_started, 3)
     findings = evaluate_controls(steps, errors)
     checks["2. bytes intact"] = check_bytes(steps, (args.width, args.height), findings)
     checks["3. controls work"] = check_controls(findings)

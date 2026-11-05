@@ -52,7 +52,7 @@ These will be fixed in Phase 1:
 
 | Phase | Status |
 |---|---|
-| 0. Prove the path on hardware | In progress: controls work, no frames yet |
+| 0. Prove the path on hardware | In progress: controls and frames work, byte integrity being checked |
 | 1. Capture and control port | Not started |
 | 2. Metric stereo | Not started |
 | 3. Live point cloud | Not started |
@@ -109,6 +109,44 @@ OpenMotion's 358 recorded control writes were replayed before capture, during ca
 **The replay is probably the wrong tool for this unit.** The sequence writes 16 high-entropy bytes through the saturation control to addresses 16 to 19, 32 to 39 and 44 to 47. The wtfuzz recording writes different bytes to the same addresses, which suggests an authentication response tied to one device or session. OpenMotion's regression, with LEDs lit and no bulk data, also matches what we saw.
 
 **Correction:** before the replay we described the worst case as a crash that a replug clears. That wasn't established, because nobody knows whether those addresses are persistent. The replay should not be repeated without a specific reason.
+
+### Root cause: the Leap was never unlocked
+
+The zero-packet failure wasn't a macOS problem. The test unit hadn't been unlocked.
+
+- `UnlockDevice.exe` was first run without administrator rights. It opened a shell, closed after Enter was pressed, and gave no sign that nothing had happened.
+- Before the unlock, the Windows Camera app showed no picture from this unit.
+- Run as administrator, the tool printed detailed output, and the Camera app then showed an image.
+
+**A locked Leap looks healthy.** It enumerates, accepts every control, returns valid calibration, and negotiates a stream. It just never sends data. To check a unit, open the Windows Camera app: a green and magenta image means it's unlocked.
+
+The installer force-installs a driver, stops `LeapService`, runs `FirmwareReset`, and restarts the service. `RestoreDevice.exe` runs the same steps with a different archive.
+
+### First frames on macOS, 2026-11-04
+
+After the unlock, a plain `leapcap` capture delivered frames through AVFoundation with no root, no libusb and no replay.
+
+| Measure | Result |
+|---|---|
+| Mode | 640×480, `yuvs` |
+| Frames seen in 8 s | 450 |
+| Measured rate | 56.3 FPS, against 57.5 advertised |
+| Frames dropped by AVFoundation | 0 |
+| Driver packets received | 17447, none dropped |
+| Frame size | 614,400 bytes |
+
+The unlock changed nothing visible over USB: IDs, strings and the 0.00 version all stayed the same. Calibration matches its backup exactly. So only streaming behaviour tells a locked unit from an unlocked one.
+
+A full probe then gave these results:
+
+- **Both cameras survive.** Saved left and right images show the same real scene from nearby viewpoints, and they correlate at 0.84.
+- **Values use the full range,** 0 to 252, so macOS isn't squeezing them into video range.
+- **Metadata is exact.** Exposures of 2000 and 8000 read back as 464 and 320, which is correct for a field that wraps at 512. Those bytes sit in the frame, so this shows the image data arrives unaltered.
+- **Exposure changes the stream without root.** The image brightened by 1.3× for 4× the exposure.
+
+Gain and LEDs weren't measured in that run, because the capture ran out of time. The images looked rotated 90°, most likely from how the Leap was resting, which needs checking.
+
+Addresses 0x00 to 0x0D hold ASCII text, `LP10227151906` on this unit. It looks like a serial number, and stayed the same before and after the unlock. Since USB reports no serial, this is a candidate key for the per-device calibration cache in Phase 1.
 
 ## Sources
 
