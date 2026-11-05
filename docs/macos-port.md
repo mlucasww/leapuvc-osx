@@ -171,6 +171,24 @@ The 30-second run measured 57.55 FPS over 1727 frames, with none dropped. The fi
 - **No IR baseline exists for the locked state,** so we don't know whether the replay was what lit the LEDs. It no longer affects this project.
 - **Unlock survival is untested.** Nobody has checked whether later Leap or Ultraleap software would undo it.
 
+### Phase 1 soak test, 2026-11-04
+
+A 10-minute stream through the full capture path, at commit `847e3f9`, on a still scene with fixed controls:
+
+| Measure | Result |
+|---|---|
+| Frames received | 34,532 in 600 s |
+| Measured rate | 57.55 FPS, steady throughout |
+| Skipped, torn, dropped | 0, 0, 0 |
+| Largest frame gap | 17.8 ms |
+| Startup from cache | 0.37 s, against 1.74 s with a device read |
+
+Every published frame is accounted for: 1 before the reader started, 34,532 received, and 5 after it stopped.
+
+**Brightness settles.** Mean brightness fell about 1.9% over the soak and was flat for the last three minutes. Part of the fall repeats at each stream start, so brightness-sensitive code should skip the first second or so. The cause isn't known.
+
+**Not covered:** stream stability while controls change, or under a heavy stereo workload in the same process. Phase 3 will exercise the second one.
+
 ## Sources
 
 - [OpenCV AVFoundation backend](https://github.com/opencv/opencv/blob/master/modules/videoio/src/cap_avfoundation_mac.mm)
