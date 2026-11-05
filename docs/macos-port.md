@@ -2,6 +2,55 @@
 
 This records why the port is built the way it is and what testing found. Setup and run instructions are in [macos/README.md](../macos/README.md).
 
+## Restarting this work
+
+**Where it stands:** Phases 0 and 1 are complete. The Leap streams natively on Apple Silicon at 57.55 FPS with no root, and the Python library and examples work. Phase 2, metric stereo, is next and hasn't been started.
+
+**Ground rules, which still apply:**
+
+- Don't compile or run code on the development MacBook. Write code there, then build and run on the Sequoia test Mac.
+- Start hardware tests from Terminal.app on the test Mac, because camera permission follows the launching app.
+- The test Mac keeps the repo at `/Users/wildwood/dev/leapuvc-osx`, on macOS 15.8.1. Its Claude session reaches this one through Remote Control.
+- Don't rerun `tools/bringup_test.py`. Don't install Leap or Ultraleap software on anything this unit connects to, because nobody has tested whether it would undo the unlock.
+- If a Leap sends no frames, confirm the unlock first: `UnlockDevice.exe` must run as administrator, and the Windows Camera app should show an image.
+
+**To restart:**
+
+1. On the test Mac, get `master` and rebuild, from the `macos/` folder:
+
+   ```bash
+   git switch master && git pull
+   ```
+
+   ```bash
+   make setup && make leapcap && make test
+   ```
+
+   Expect 88 tests to pass.
+
+2. Run a quick health check, which should report a clean run at about 57.55 FPS:
+
+   ```bash
+   .venv/bin/python tools/stream_test.py --seconds 10
+   ```
+
+**Next: Phase 2, metric stereo**
+
+1. Add `macos/leapmac/stereo.py`, building a `StereoRig` from the calibration: one shared rectified camera matrix for both cameras, plus `Q` from the 39.87 mm baseline. `parseLeapCalibration` still gives each camera its own matrix, which is fine for a preview but wrong for metric depth.
+2. Compute disparity with `cv2.StereoSGBM` at 640×480, and convert it to metres.
+3. Run a tape-measure test at 0.5, 1, 2 and 3 m, using a flat, textured target. Publish the measured error table, replacing the estimates in the plan.
+
+**Phase 2 needs from the user:** a tape measure, a flat textured target, and someone at the test Mac.
+
+**Keep in mind for Phase 2:**
+
+- Mount the Leap with its long edge horizontal and the green light at the bottom.
+- Prefer gain over long exposure, because exposure has a weak effect and long values cut the frame rate.
+- Skip the first second of brightness data and the first frame's exposure metadata.
+- Rectification looks right by eye, but its metric accuracy is unproven.
+
+**Later phases:** Phase 3 needs Python 3.11 or later on the test Mac for Rerun, and it has 3.9.6. Phase 3 is also the first test of stereo processing alongside capture. Phase 4 adds the camera mount, and Phase 5 finishes the documentation. Tethered camera control stays out of scope for now.
+
 Diagrams of the architecture, frame pipeline, startup sequence, Phase 0 decisions, data structures and control map are on the [design canvas](https://claude.ai/artifact/F5Jw8hw83G4R3RoiXpKtsw). The link is private until shared.
 
 ## Why macOS never worked
