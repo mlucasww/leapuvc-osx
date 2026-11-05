@@ -101,6 +101,20 @@ To check the stream, count every frame for 10 minutes:
 
 Mount the Leap with its long edge horizontal and the green light at the bottom, which gives an upright image.
 
+## Measure depth accuracy
+
+Place a flat, textured target square-on and centred, then measure from the Leap's front face to the target. Run this from Terminal.app, at each distance, in metres:
+
+```bash
+.venv/bin/python tools/depth_test.py --distance 1.0 --preview
+```
+
+Press space to measure, or `q` to cancel. To print the error table:
+
+```bash
+.venv/bin/python tools/depth_test.py --summary
+```
+
 ## Test a bring-up sequence
 
 You shouldn't need this. It was written to find out whether a recorded sequence of control writes could wake a silent Leap, and all three scenarios failed on our test unit. The real cause was that the unit hadn't been unlocked, so check that first, and don't rerun these without a specific reason. The sequence writes bytes to device registers that may be persistent, as the [notes on it](third_party/openmotion/README.md) explain.
@@ -130,6 +144,7 @@ Results go to `probe_out/bringup-<scenario>-<timestamp>/`. The sequence comes fr
 | `leapmac/controls.py` | Runs every USB control on one thread |
 | `leapmac/calibration_cache.py` | Per-device calibration cache |
 | `leapmac/devices.py` | Finds the Leap among AVFoundation's cameras |
+| `leapmac/stereo.py` | Shared rectification, disparity and metric depth |
 | `leapmac/frames.py` | Frame decoding and image statistics |
 | `leapmac/uvc_descriptors.py` | USB descriptor parsing |
 | `leapmac/uvc_control.py` | UVC controls through libusb |
@@ -139,6 +154,7 @@ Results go to `probe_out/bringup-<scenario>-<timestamp>/`. The sequence comes fr
 | `tools/probe_leap.py` | The hardware probe |
 | `tools/run_example.py` | Runs the repo's Python examples unchanged on macOS |
 | `tools/stream_test.py` | Soak test that counts every frame |
+| `tools/depth_test.py` | Tape-measure test of depth accuracy |
 | `tools/bringup_test.py` | Tests whether a bring-up wakes the video stream |
 | `tools/read_registers.py` | Reads known-safe registers and checks calibration against a backup |
 | `third_party/openmotion/` | The recorded sequence and its licence |

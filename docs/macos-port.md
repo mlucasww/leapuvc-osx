@@ -105,7 +105,7 @@ Still to fix in Phase 2: `parseLeapCalibration` rectifies each camera to its own
 |---|---|
 | 0. Prove the path on hardware | Done: Path A confirmed |
 | 1. Capture and control port | Done |
-| 2. Metric stereo | Not started |
+| 2. Metric stereo | Code written, not yet run |
 | 3. Live point cloud | Not started |
 | 4. Camera mount | Not started |
 | 5. Documentation and handover | Not started |
