@@ -2,7 +2,7 @@
 
 This folder is the Apple Silicon port of LeapUVC. The goal is a live 3D point cloud from an unlocked Leap Motion Controller, to help judge scene layout for a mirrorless camera.
 
-**Status:** Phase 0. Controls, calibration and capture all work without root on an unlocked Leap. Byte integrity is being checked with the hardware probe.
+**Status:** Phase 0 is complete. On an unlocked Leap, capture, controls and calibration all work on macOS without root, with both cameras' images intact. Phase 1 builds the reusable capture library on this path.
 
 Design notes and results are in [docs/macos-port.md](../docs/macos-port.md).
 

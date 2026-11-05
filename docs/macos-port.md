@@ -22,7 +22,7 @@ Frames and controls take separate paths:
 
 The `macuvc` project proved this split on Apple Silicon, but it keeps only every other byte. On a Leap, that would lose the right camera.
 
-Nobody has shown the Leap itself working this way, which is why Phase 0 tests it first.
+Phase 0 confirmed this works on an unlocked Leap, with both cameras' bytes intact.
 
 ## Decisions
 
@@ -52,7 +52,7 @@ These will be fixed in Phase 1:
 
 | Phase | Status |
 |---|---|
-| 0. Prove the path on hardware | In progress: controls and frames work, byte integrity being checked |
+| 0. Prove the path on hardware | Done: Path A confirmed |
 | 1. Capture and control port | Not started |
 | 2. Metric stereo | Not started |
 | 3. Live point cloud | Not started |
@@ -137,16 +137,37 @@ After the unlock, a plain `leapcap` capture delivered frames through AVFoundatio
 
 The unlock changed nothing visible over USB: IDs, strings and the 0.00 version all stayed the same. Calibration matches its backup exactly. So only streaming behaviour tells a locked unit from an unlocked one.
 
-A full probe then gave these results:
-
-- **Both cameras survive.** Saved left and right images show the same real scene from nearby viewpoints, and they correlate at 0.84.
-- **Values use the full range,** 0 to 252, so macOS isn't squeezing them into video range.
-- **Metadata is exact.** Exposures of 2000 and 8000 read back as 464 and 320, which is correct for a field that wraps at 512. Those bytes sit in the frame, so this shows the image data arrives unaltered.
-- **Exposure changes the stream without root.** The image brightened by 1.3× for 4× the exposure.
-
-Gain and LEDs weren't measured in that run, because the capture ran out of time. The images looked rotated 90°, most likely from how the Leap was resting, which needs checking.
-
 Addresses 0x00 to 0x0D hold ASCII text, `LP10227151906` on this unit. It looks like a serial number, and stayed the same before and after the unlock. Since USB reports no serial, this is a candidate key for the per-device calibration cache in Phase 1.
+
+### Phase 0 result: Path A, 2026-11-04
+
+All four probe checks passed at commit `4956164`, with no root and no replay. **Frames come through AVFoundation, controls go over libusb on endpoint 0, and calibration comes from the device.**
+
+| Check | Evidence |
+|---|---|
+| Device visible | Listed with `yuvs` at all six modes |
+| Bytes intact | Stereo correlation 0.89, values 0 to 255, metadata exact |
+| Controls work | Exposure, gain and LEDs all changed the stream while it ran |
+| Calibration valid | Repeat reads match, and match the backup |
+
+The 30-second run measured 57.55 FPS over 1727 frames, with none dropped. The first frame arrived 0.2 s after capture started.
+
+**Control behaviour measured:**
+
+- **Metadata wraps as expected.** Exposures of 2000 and 8000 read back as 464 and 320, and gain 40 reads back as 8. These are exact, and they sit in the frame bytes, so the data arrives unaltered.
+- **Both gain forms work.** The plain and `0x4000` selector forms gave near-identical images. It isn't known whether the device treats them differently in any way, so Phase 1 keeps the repo's plain form.
+- **LEDs are controllable.** Mean brightness fell from 149 to 4.4 with them off, and returned to 149.
+- **Orientation:** with the long edge horizontal and the green light at the bottom, the image is upright. Earlier sideways images came from how the Leap was resting, and there's no sign of a sensor rotation. The rigid mount should keep this orientation.
+
+**Open items to carry forward:**
+
+- **Exposure response is weak.** Four times the exposure raised mean brightness only 22 to 30%, below the probe's own 1.3× threshold in the final run. Check 3 passed on other controls. Gamma, saturation and LED output may all contribute, none tested. Exposure shouldn't be treated as linear.
+- **Frame alternation is unproven.** `frame_label` read 1 in every sample, but all samples fell on even frame indices, so this may be aliasing. Phase 1 should log consecutive frames.
+- **Left and right brightness can differ.** Left read about 10% dimmer in the final run but equal in the one before, which suggests the scene rather than a sensor offset. It needs checking.
+- **The 13-second delay is only explained by elimination.** It disappeared once OpenCV was imported before streaming, but its cause wasn't measured directly.
+- **Restored settings weren't verified.** The probe restores exposure and gain, but it doesn't read them back afterwards.
+- **No IR baseline exists for the locked state,** so we don't know whether the replay was what lit the LEDs. It no longer affects this project.
+- **Unlock survival is untested.** Nobody has checked whether later Leap or Ultraleap software would undo it.
 
 ## Sources
 
