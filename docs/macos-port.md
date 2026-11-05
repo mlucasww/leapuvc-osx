@@ -189,6 +189,26 @@ Every published frame is accounted for: 1 before the reader started, 34,532 rece
 
 **Not covered:** stream stability while controls change, or under a heavy stereo workload in the same process. Phase 3 will exercise the second one.
 
+### Black image in cameraControlExample
+
+The example showed black from the first frame on macOS, while `minimumExample` worked. **OpenCV 5.0 calls a slider's callback when the slider is created,** so the example's `Dgtl Gain` slider, which starts at 0, sent digital gain 0 at launch. Digital gain 0 gives a black image.
+
+The macOS library now clamps digital gain to the device's range of 4 to 15. An explicit 0 or 16 becomes the nearest valid value, because both give black. Whether older OpenCV versions on Windows behave the same is untested.
+
+**Control measurements, with one reading per setting on one scene:**
+
+| Control | Finding |
+|---|---|
+| Power-on values | Exposure 300, gain 16, digital gain 4, gamma on, no dark frames |
+| Persistence | Settings survive across streams and processes until a replug, so they're now reset before every stream |
+| Digital gain | Device range 4 to 15. Mean brightness 19 at 1, 76 at 4, 135 at 8, and 0 at both 0 and 16 |
+| Analog gain | Device range 16 to 63. Values below 16 image like 16. Metadata reports the raw value, wrapped at 32 |
+| Exposure | Mean rises only from 77 to 143 between 300 and 32222 µs, with gamma on. Long exposures lower the frame rate: about 32 ms gave 31 FPS |
+| Gamma | Off gave a mean of 59, on gave 77 |
+| HDR | On gave 49 against 77, and left and right brightness matched |
+
+**Rectification works here.** Maps are sensible, with the centre pixel moving only a few pixels and 97% of output covered. Rectified images are recognisable and straightened. The black result in upstream issue #17 didn't reproduce, though metric accuracy is still untested until Phase 2.
+
 ## Sources
 
 - [OpenCV AVFoundation backend](https://github.com/opencv/opencv/blob/master/modules/videoio/src/cap_avfoundation_mac.mm)

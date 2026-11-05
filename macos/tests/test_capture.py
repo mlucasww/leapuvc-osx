@@ -52,6 +52,14 @@ def test_led_control_packs_selector_and_value():
     assert device.written == [("contrast", 2 | (1 << 6)), ("contrast", 4)]
 
 
+def test_digital_gain_stays_in_the_device_range():
+    thread, device = fake_thread()
+    thread.setDigitalGain(0)
+    thread.setDigitalGain(16)
+    thread.setDigitalGain(8)
+    assert device.written == [("digital_gain", 4), ("digital_gain", 15), ("digital_gain", 8)]
+
+
 def test_unmapped_properties_are_refused():
     thread, device = fake_thread()
     assert thread.cam.set(cv2.CAP_PROP_FPS, 30) is False

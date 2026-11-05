@@ -23,7 +23,7 @@ import cv2
 import numpy as np
 
 from . import calibration_cache, frames, uvc_control
-from .controls import ControlThread
+from .controls import ControlThread, apply_defaults
 from .devices import DEFAULT_PID, DEFAULT_VID, matches_leap, run_leapcap_list
 from .helper import StreamHelper
 from .ring import FrameRing
@@ -52,6 +52,12 @@ PROPERTY_CONTROLS = {
     cv2.CAP_PROP_SHARPNESS: "sharpness",
     cv2.CAP_PROP_SATURATION: "saturation",
 }
+
+
+# Values outside the device's reported range are clamped. Digital gain 0 and 16
+# both give a black image, and OpenCV 5 calls slider callbacks at creation, so
+# a slider that starts at 0 would otherwise black out the image at launch.
+CONTROL_LIMITS = {"digital_gain": (4, 15)}
 
 
 def _load_shared_module():
@@ -86,6 +92,9 @@ class ControlChannel:
         if name is None:
             return False
         value = int(value) & 0xFFFF
+        if name in CONTROL_LIMITS:
+            low, high = CONTROL_LIMITS[name]
+            value = min(max(value, low), high)
         try:
             self.controls.call(lambda device: device.set(name, value))
         except CONTROL_ERRORS as error:
@@ -181,6 +190,8 @@ class leapImageThread(_shared.leapImageThread):
                 raise LeapStreamError(f"No USB device {vendorId:04x}:{productId:04x}. Is the Leap plugged in?")
             with device:
                 blob, origin = calibration_cache.load_calibration(device, cacheDirectory)
+                # Settings survive until power is lost, so clear any left by earlier runs.
+                apply_defaults(device)
         return parseLeapCalibration(blob, self.resolution), origin
 
     def _startStreaming(self, leapcap, uniqueId):

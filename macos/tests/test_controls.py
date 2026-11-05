@@ -2,7 +2,8 @@ import threading
 
 import pytest
 
-from leapmac.controls import ControlThread
+from leapmac import uvc_control
+from leapmac.controls import ControlThread, apply_defaults
 
 
 class FakeUsb:
@@ -58,6 +59,36 @@ def test_errors_reach_the_caller_and_the_thread_survives():
         thread.call(fail)
     assert thread.call(lambda device: 42) == 42
     thread.stop()
+
+
+def test_defaults_match_the_measured_power_on_values():
+    class Recorder:
+        def __init__(self):
+            self.values = {}
+            self.fields = {}
+            self.leds = None
+
+        def set(self, name, value):
+            self.values[name] = value
+
+        def set_contrast_field(self, selector, value):
+            self.fields[selector] = value
+
+        def set_leds(self, enabled):
+            self.leds = enabled
+
+    device = Recorder()
+    apply_defaults(device)
+
+    assert device.values == {
+        "exposure": 300,
+        "gain": 16,
+        "digital_gain": 4,
+        "gamma": 1,
+        "dark_frame_interval": 0,
+    }
+    assert device.fields == {uvc_control.CONTRAST_HDR: 0, uvc_control.CONTRAST_ROTATE: 0}
+    assert device.leds is True
 
 
 def test_missing_device_fails_open():

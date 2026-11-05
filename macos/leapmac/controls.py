@@ -13,6 +13,25 @@ from . import uvc_control
 CALL_TIMEOUT_S = 3.0
 OPEN_TIMEOUT_S = 5.0
 
+# Power-on values measured after a replug. The device keeps whatever was last
+# set until it loses power, so these are applied before every stream.
+DEFAULT_CONTROLS = (
+    ("exposure", 300),
+    ("gain", 16),
+    ("digital_gain", 4),
+    ("gamma", 1),
+    ("dark_frame_interval", 0),
+)
+
+
+def apply_defaults(device):
+    """Return the camera to known settings, including the write-only contrast fields."""
+    for name, value in DEFAULT_CONTROLS:
+        device.set(name, value)
+    device.set_contrast_field(uvc_control.CONTRAST_HDR, 0)
+    device.set_contrast_field(uvc_control.CONTRAST_ROTATE, 0)
+    device.set_leds(True)
+
 
 class ControlThread(threading.Thread):
     def __init__(self, vendor_id, product_id, libusb_factory=uvc_control.Libusb):
