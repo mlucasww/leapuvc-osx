@@ -155,6 +155,7 @@ Results go to `probe_out/bringup-<scenario>-<timestamp>/`. The sequence comes fr
 | `tools/run_example.py` | Runs the repo's Python examples unchanged on macOS |
 | `tools/stream_test.py` | Soak test that counts every frame |
 | `tools/depth_test.py` | Tape-measure test of depth accuracy |
+| `tools/rectify_variants.py` | Scores alternative geometry readings against saved runs |
 | `tools/bringup_test.py` | Tests whether a bring-up wakes the video stream |
 | `tools/read_registers.py` | Reads known-safe registers and checks calibration against a backup |
 | `third_party/openmotion/` | The recorded sequence and its licence |

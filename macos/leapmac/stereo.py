@@ -37,8 +37,14 @@ class StereoRig:
     right_maps: tuple
 
     @classmethod
-    def from_calibration(cls, calibration, resolution):
-        """Build shared rectification from a parseLeapCalibration result."""
+    def from_calibration(cls, calibration, resolution, rotation="factory", offsets=None):
+        """Build shared rectification from a parseLeapCalibration result.
+
+        `rotation` and `offsets` exist to test alternative readings of the
+        factory geometry. "factory" uses each camera's stored rotation,
+        "transposed" its inverse and "identity" none. `offsets` maps a camera
+        name to a (dx, dy) shift, in pixels, of that camera's rectified image.
+        """
         width, height = resolution
         baseline_m = float(calibration["baseline"]) / 1000.0
         if not BASELINE_RANGE_M[0] <= baseline_m <= BASELINE_RANGE_M[1]:
@@ -53,13 +59,22 @@ class StereoRig:
         cx, cy = width / 2.0, height / 2.0
         shared = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float64)
 
+        offsets = offsets or {}
         maps = {}
         for camera in ("left", "right"):
+            stored = np.asarray(calibration[camera]["extrinsics"]["r"], dtype=np.float64)
+            rotations = {"factory": stored, "transposed": stored.T, "identity": np.eye(3)}
+            if rotation not in rotations:
+                raise ValueError(f"unknown rotation mode {rotation!r}")
+            target = shared.copy()
+            dx, dy = offsets.get(camera, (0.0, 0.0))
+            target[0, 2] += dx
+            target[1, 2] += dy
             maps[camera] = cv2.initUndistortRectifyMap(
                 calibration[camera]["extrinsics"]["cameraMatrix"],
                 calibration[camera]["intrinsics"]["distCoeffs"],
-                np.asarray(calibration[camera]["extrinsics"]["r"]),
-                shared,
+                rotations[rotation],
+                target,
                 (width, height),
                 cv2.CV_16SC2,
             )
@@ -145,6 +160,27 @@ def region_stats(depth, half_size):
         "p25_m": float(p25),
         "p75_m": float(p75),
     }
+
+
+def region_shift(left, right, half_size):
+    """Measure the central region's shift between rectified images by correlation.
+
+    This needs no features, so it works on dark or plain targets. Returns
+    disparity (positive when the right image is shifted left, as for any point
+    in front of the rig), row offset (right minus left, in pixels), and
+    OpenCV's response, which falls towards 0 as the match gets unreliable.
+    """
+    height, width = left.shape
+    rows = slice(height // 2 - half_size, height // 2 + half_size)
+    columns = slice(width // 2 - half_size, width // 2 + half_size)
+
+    def prepared(image):
+        region = image[rows, columns].astype(np.float32)
+        return region - cv2.GaussianBlur(region, (0, 0), 3)
+
+    window = cv2.createHanningWindow((2 * half_size, 2 * half_size), cv2.CV_32F)
+    (dx, dy), response = cv2.phaseCorrelate(prepared(left), prepared(right), window)
+    return {"disparity_px": float(-dx), "row_offset_px": float(dy), "response": float(response)}
 
 
 def vertical_alignment(left, right):

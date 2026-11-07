@@ -135,6 +135,48 @@ def test_region_stats_handle_an_empty_region():
     assert stereo.region_stats(depth, half_size=10)["median_m"] is None
 
 
+def test_region_shift_reports_disparity_and_row_offset():
+    left = textured()
+    right = np.roll(np.roll(left, -12, axis=1), 3, axis=0)
+
+    shift = stereo.region_shift(left, right, half_size=80)
+
+    assert shift["disparity_px"] == pytest.approx(12, abs=0.3)
+    assert shift["row_offset_px"] == pytest.approx(3, abs=0.3)
+    assert shift["response"] > 0.3
+
+
+def test_rotation_modes_differ_only_when_rotation_is_present():
+    tilted = calibration()
+    angle = 0.02
+    tilted["left"]["extrinsics"]["r"] = np.array(
+        [[np.cos(angle), 0, np.sin(angle)], [0, 1, 0], [-np.sin(angle), 0, np.cos(angle)]],
+        dtype=np.float32,
+    )
+    factory = stereo.StereoRig.from_calibration(tilted, (WIDTH, HEIGHT))
+    transposed = stereo.StereoRig.from_calibration(tilted, (WIDTH, HEIGHT), rotation="transposed")
+    identity = stereo.StereoRig.from_calibration(calibration(), (WIDTH, HEIGHT), rotation="identity")
+    plain = stereo.StereoRig.from_calibration(calibration(), (WIDTH, HEIGHT))
+
+    assert not np.array_equal(factory.left_maps[0], transposed.left_maps[0])
+    assert np.array_equal(identity.left_maps[0], plain.left_maps[0])
+
+
+def test_unknown_rotation_mode_is_rejected():
+    with pytest.raises(ValueError):
+        stereo.StereoRig.from_calibration(calibration(), (WIDTH, HEIGHT), rotation="sideways")
+
+
+def test_offsets_shift_one_cameras_rectified_image():
+    built = stereo.StereoRig.from_calibration(calibration(), (WIDTH, HEIGHT), offsets={"right": (5.0, 0.0)})
+    image = np.zeros((HEIGHT, WIDTH), dtype=np.uint8)
+    cv2.circle(image, (315, 245), 3, 255, -1)
+
+    _, right = built.rectify(image, image)
+
+    assert np.argwhere(right == right.max()).mean(axis=0) == pytest.approx([240, 325], abs=1.5)
+
+
 def test_alignment_is_near_zero_for_a_pure_horizontal_shift():
     left = textured()
     right = np.roll(left, -20, axis=1)

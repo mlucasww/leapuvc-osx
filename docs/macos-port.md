@@ -272,6 +272,31 @@ Phase 1 is complete at commit `1b71a2d`. All 88 unit tests pass, and both exit c
 - **The soak predates the control fixes.** They only touch startup and value limits, but the 10-minute run wasn't repeated.
 - **`stereoExample` hasn't been run on macOS.** Phase 2 replaces its role.
 
+### Phase 2 first measurements, 2026-11-05
+
+The Leap faced down at a table, with an 8.5 × 11 in sheet of paper as the target. Distances are from the Leap's front face, at commit `18d861c`, default exposure and gain:
+
+| True distance | SGBM depth | Error | Correlation disparity | Expected disparity | Row offset |
+|---|---|---|---|---|---|
+| 0.592 m | 0.662 m | +11.9% | 8.30 px | 9.02 px | 0.8 px |
+| 0.837 m | 0.939 m | +12.3% | 5.60 px | 6.38 px | 0.6 px |
+
+A first run at 0.592 m read 0.780 m, but a glossy LED reflection in the centre pulled its median, so it's excluded.
+
+**What the evidence says:**
+
+- **Focal length is right.** Sizing the paper gives distances within about 2%.
+- **Disparity is short by 0.7 to 1 px.** This could be a scale error of about 0.89, equivalent to a 35.6 mm baseline, or a constant offset. Two distances can't tell them apart.
+- **Rows are off by 0.6 to 0.8 px,** so rectification isn't fully aligned.
+- **The alignment check returned nothing:** frames had a mean brightness of about 10 out of 255, too dark for feature matching.
+- **The stream ran 57.35 FPS** in a 10-second check, with one 52 ms gap.
+
+**Leading suspect: the rotation convention.** The factory rotations differ between the cameras by about 0.006 rad about the vertical axis. At 134 px focal length that's 0.8 px of disparity, the size of the error. If the sign is wrong, or the Cayley transform's factor of 2 is, rectification would leave this error behind. The blob's per-camera `center` values are unused, but they differ by 5.7 px in x, far more than the error, so they're a weaker suspect.
+
+**Next:** `depth_test.py` now saves raw frames, measures disparity and row offset by correlation, and takes exposure and gain settings for dark scenes. `tools/rectify_variants.py` then scores each geometry reading against the tape measure offline. A run near 1.5 m would also separate scale from offset, with a predicted 1.68 m for scale or 1.90 m for offset.
+
+A setup diagram from that session is at https://claude.ai/artifact/936KBzGDR5MTefsq35rgdL.
+
 ## Sources
 
 - [OpenCV AVFoundation backend](https://github.com/opencv/opencv/blob/master/modules/videoio/src/cap_avfoundation_mac.mm)

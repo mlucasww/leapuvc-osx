@@ -44,6 +44,10 @@ def parse_args():
     parser.add_argument("--preview", action="store_true")
     parser.add_argument("--summary", action="store_true")
     parser.add_argument("--note", default="")
+    parser.add_argument("--exposure", type=int, help="exposure in microseconds, for dark scenes")
+    parser.add_argument("--gain", type=int, help="analog gain, 16 to 63")
+    parser.add_argument("--digital-gain", type=int, help="digital gain, 4 to 15")
+    parser.add_argument("--raw-frames", type=int, default=10, help="raw frames to save for offline analysis")
     parser.add_argument("--out", type=Path, default=ROOT / "probe_out")
     args = parser.parse_args()
     if not args.summary and args.distance is None:
@@ -101,11 +105,22 @@ def preview(leap, rig, matcher, args):
     return False
 
 
+def apply_settings(leap, args):
+    if args.exposure is not None:
+        leap.setExposure(args.exposure)
+    if args.gain is not None:
+        leap.setGain(args.gain)
+    if args.digital_gain is not None:
+        leap.setDigitalGain(args.digital_gain)
+
+
 def measure(leap, rig, matcher, args):
     time.sleep(SETTLE_S)
-    medians, valid_fractions, match_times = [], [], []
+    medians, valid_fractions, match_times, shifts, raw = [], [], [], [], []
     for _ in range(args.frames):
         image = next_image(leap)
+        if len(raw) < args.raw_frames:
+            raw.append(image.copy())
         left, right = rig.rectify(image[0], image[1])
         started = time.perf_counter()
         disparity = stereo.compute_disparity(matcher, left, right)
@@ -115,20 +130,33 @@ def measure(leap, rig, matcher, args):
         valid_fractions.append(stats["valid_fraction"])
         if stats["median_m"] is not None:
             medians.append(stats["median_m"])
+        shifts.append(stereo.region_shift(left, right, args.region))
 
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     directory = args.out / f"depth-{stamp}"
     directory.mkdir(parents=True)
+    # Raw frames let tools/rectify_variants.py try other geometry offline.
+    np.savez_compressed(directory / "raw.npz", frames=np.stack(raw))
     cv2.imwrite(str(directory / "rectified_left.png"), left)
     cv2.imwrite(str(directory / "rectified_right.png"), right)
     colored = colorize(disparity, stereo.DEFAULT_NUM_DISPARITIES)
     draw_region(colored, args.region)
     cv2.imwrite(str(directory / "disparity.png"), colored)
 
+    shift_disparity = float(np.median([shift["disparity_px"] for shift in shifts]))
     return {
         "recorded_at": datetime.now().isoformat(timespec="seconds"),
         "true_m": args.distance,
         "note": args.note,
+        "settings": {"exposure": args.exposure, "gain": args.gain, "digital_gain": args.digital_gain},
+        "mean_brightness": round(float(raw[-1].mean()), 1),
+        "expected_disparity_px": rig.fx * rig.baseline_m / args.distance,
+        "region_shift": {
+            "disparity_px": shift_disparity,
+            "row_offset_px": float(np.median([shift["row_offset_px"] for shift in shifts])),
+            "response": float(np.median([shift["response"] for shift in shifts])),
+            "depth_m": float(rig.depth(shift_disparity)) if shift_disparity > 0 else None,
+        },
         "frames": args.frames,
         "region_half_size": args.region,
         "median_m": float(np.median(medians)) if medians else None,
@@ -167,6 +195,7 @@ def main():
     rig = stereo.StereoRig.from_calibration(leap.calibration, leap.resolution)
     matcher = stereo.make_matcher()
     leap.start()
+    apply_settings(leap, args)
     try:
         if args.preview and not preview(leap, rig, matcher, args):
             return
