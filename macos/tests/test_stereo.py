@@ -146,6 +146,41 @@ def test_region_shift_reports_disparity_and_row_offset():
     assert shift["response"] > 0.3
 
 
+def test_region_disparity_averages_below_sgbm_steps():
+    disparity = np.full((100, 100), np.nan, dtype=np.float32)
+    disparity[40:60, 40:60] = 5.0
+    disparity[40:60, 50:60] = 5.25
+
+    assert stereo.region_disparity(disparity, half_size=10) == pytest.approx(5.125, abs=0.03)
+
+
+def test_region_disparity_trims_stray_matches():
+    disparity = np.full((100, 100), 4.0, dtype=np.float32)
+    disparity[50, 50] = 90.0
+    assert stereo.region_disparity(disparity, half_size=10) == pytest.approx(4.0)
+
+
+def test_region_disparity_needs_enough_matched_pixels():
+    disparity = np.full((100, 100), np.nan, dtype=np.float32)
+    disparity[50, 50:55] = 4.0
+    assert stereo.region_disparity(disparity, half_size=10) is None
+
+
+def test_fit_separates_an_offset_from_a_scale_error():
+    expected = [20.9, 10.7, 4.8]
+    offset_only = stereo.fit_scale_offset(expected, [value - 0.8 for value in expected])
+    scale_only = stereo.fit_scale_offset(expected, [value * 0.89 for value in expected])
+
+    assert offset_only["scale"] == pytest.approx(1.0)
+    assert offset_only["offset_px"] == pytest.approx(-0.8)
+    assert scale_only["scale"] == pytest.approx(0.89)
+    assert scale_only["offset_px"] == pytest.approx(0.0, abs=1e-9)
+
+
+def test_fit_needs_two_distances():
+    assert stereo.fit_scale_offset([5.0, 5.0], [4.0, 4.1]) is None
+
+
 def test_rotation_modes_differ_only_when_rotation_is_present():
     tilted = calibration()
     angle = 0.02

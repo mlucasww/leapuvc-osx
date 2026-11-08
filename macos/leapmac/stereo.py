@@ -162,6 +162,37 @@ def region_stats(depth, half_size):
     }
 
 
+def region_disparity(disparity, half_size, trim_percent=10):
+    """Average disparity in a centred square, finer than SGBM's 1/16 px steps.
+
+    The extreme tails are trimmed first, so stray mismatches don't skew it.
+    Returns None when fewer than a quarter of the pixels matched.
+    """
+    height, width = disparity.shape
+    region = disparity[
+        height // 2 - half_size : height // 2 + half_size,
+        width // 2 - half_size : width // 2 + half_size,
+    ]
+    valid = region[np.isfinite(region)]
+    if valid.size < region.size / 4:
+        return None
+    low, high = np.percentile(valid, (trim_percent, 100 - trim_percent))
+    kept = valid[(valid >= low) & (valid <= high)]
+    return float(kept.mean())
+
+
+def fit_scale_offset(expected_px, measured_px):
+    """Fit measured = scale * expected + offset, to tell the two error kinds apart.
+
+    A pure scale error gives offset near 0. A geometry error that shifts every
+    point equally gives scale near 1 and a constant offset.
+    """
+    if len(set(expected_px)) < 2:
+        return None
+    scale, offset = np.polyfit(np.asarray(expected_px, float), np.asarray(measured_px, float), 1)
+    return {"scale": float(scale), "offset_px": float(offset)}
+
+
 def region_shift(left, right, half_size):
     """Measure the central region's shift between rectified images by correlation.
 

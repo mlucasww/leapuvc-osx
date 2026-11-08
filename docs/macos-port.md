@@ -297,6 +297,38 @@ A first run at 0.592 m read 0.780 m, but a glossy LED reflection in the centre p
 
 A setup diagram from that session is at https://claude.ai/artifact/936KBzGDR5MTefsq35rgdL.
 
+### Wall measurements, 2026-11-07
+
+The Leap was on a tripod, mounted horizontally with the green light at the bottom. It faced a crumpled-paper patch about 95 px across taped to a wall, and distances came from a laser tape. Settings were 4000 µs exposure, with digital gain 4 to 15 to keep brightness up. Instructions are at https://claude.ai/artifact/TzfGTVvLNQ8nxFJk5oRU7c.
+
+These use factory rectification and SGBM. Medians step in 1/16 px.
+
+| True | Measured | Error | Disparity | Expected | Shortfall |
+|---|---|---|---|---|---|
+| 0.255 m | 0.267 m | +4.7% | 20.00 px | 20.94 px | 0.95 px |
+| 0.497 m | 0.534 m | +7.5% | 10.00 px | 10.75 px | 0.75 px |
+| 1.103 m | 1.285 m | +16.5% | 4.16 px | 4.84 px | 0.69 px |
+| 1.536 m | 1.709 to 1.744 m | +11 to +14% | 3.06 to 3.13 px | 3.48 px | 0.35 to 0.41 px |
+| 2.027 m | 2.035 m | +0.4% | 2.63 px | 2.63 px | 0.01 px |
+
+**The shortfall is a roughly constant offset, not a scale error.** It stays at 0.7 to 0.9 px up to 1.1 m. A 0.89 scale error would mean a 2.3 px shortfall at 0.255 m. Past 1.5 m the runs are too noisy to judge: frame-to-frame spread was 0.14 to 0.6 m, and frames were dark even at maximum digital gain. Analog gain and longer exposure weren't tried.
+
+**Leaving the rotation out looked best on the one reliable run,** at 0.497 m:
+
+| Geometry | Error | Row offset |
+|---|---|---|
+| Factory rotation | +10.6% | 0.44 px |
+| Transposed | −5.7% | −0.22 px |
+| No rotation | +0.9% | 0.0 px |
+| With `center` offsets | over +500% | — |
+
+The `center` offsets are clearly wrong as a reading. The rest of the variant scores came from a correlation window too small for the patch and for near disparities, so they were noise. The tool now scores each variant with SGBM, and fits scale and offset across distances.
+
+**Other notes:**
+
+- A centred LED hotspot can saturate a close target, as at 0.255 m with gain 8. Lower the gain until the target shows texture.
+- An ordinary LED lamp adds no infrared light, so it doesn't help.
+
 ## Sources
 
 - [OpenCV AVFoundation backend](https://github.com/opencv/opencv/blob/master/modules/videoio/src/cap_avfoundation_mac.mm)
