@@ -92,7 +92,15 @@ def start_rerun(args, rig):
     if args.save:
         rr.save(args.save, default_blueprint=blueprint())
     else:
-        rr.spawn(memory_limit="2GB", default_blueprint=blueprint())
+        # Rerun looks for its viewer on PATH, which lacks the venv's bin
+        # folder unless the venv is activated. Use the viewer installed
+        # beside this Python instead, without resolving the venv's symlink.
+        viewer = Path(sys.executable).parent / "rerun"
+        rr.spawn(
+            memory_limit="2GB",
+            default_blueprint=blueprint(),
+            executable_path=str(viewer) if viewer.exists() else None,
+        )
 
     # The rig's frame is x right, y down, z forward.
     rr.log("world", rr.ViewCoordinates.RDF, static=True)
