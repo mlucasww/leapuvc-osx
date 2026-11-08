@@ -4,7 +4,7 @@ This records why the port is built the way it is and what testing found. Setup a
 
 ## Restarting this work
 
-**Where it stands:** Phases 0 and 1 are complete. The Leap streams natively on Apple Silicon at 57.55 FPS with no root, and the Python library and examples work. Phase 2, metric stereo, is next and hasn't been started.
+**Where it stands:** Phases 0, 1 and 2 are complete. The Leap streams natively on Apple Silicon at 57.55 FPS with no root, the Python library and examples work, and corrected depth is within 1.5% from 0.25 to 2 m on the test unit. Phase 3, the live point cloud, is next.
 
 **Ground rules, which still apply:**
 
@@ -34,22 +34,24 @@ This records why the port is built the way it is and what testing found. Setup a
    .venv/bin/python tools/stream_test.py --seconds 10
    ```
 
-**Next: Phase 2, metric stereo**
+**Next: Phase 3, live point cloud**
 
-1. Add `macos/leapmac/stereo.py`, building a `StereoRig` from the calibration: one shared rectified camera matrix for both cameras, plus `Q` from the 39.87 mm baseline. `parseLeapCalibration` still gives each camera its own matrix, which is fine for a preview but wrong for metric depth.
-2. Compute disparity with `cv2.StereoSGBM` at 640×480, and convert it to metres.
-3. Run a tape-measure test at 0.5, 1, 2 and 3 m, using a flat, textured target. Publish the measured error table, replacing the estimates in the plan.
+1. Build `macos/leapmac/cloud.py` on `StereoRig`, using no rotation by default and the test unit's `disparity_offset_px` of 0.168. Reproject depth to points, filter them, and apply a maximum range.
+2. Stream the cloud to Rerun, and add PLY snapshots.
+3. Average over frames, or regions, to steady depth beyond about 1.5 m.
+4. Handle exposure by distance: close targets saturate at high gain, and far ones need analog gain.
+5. Exit check: at least 10 FPS at 640×480 on the test Mac, with latency measured. SGBM took about 12 ms per frame in Phase 2.
 
-**Phase 2 needs from the user:** a tape measure, a flat textured target, and someone at the test Mac.
+**Phase 3 needs from the user:** Python 3.11 or later on the test Mac for Rerun, because it has 3.9.6. Install it from Homebrew or python.org, then rebuild the virtual environment.
 
-**Keep in mind for Phase 2:**
+**Keep in mind:**
 
 - Mount the Leap with its long edge horizontal and the green light at the bottom.
-- Prefer gain over long exposure, because exposure has a weak effect and long values cut the frame rate.
+- Depth needs a textured scene. Plain walls and glossy surfaces give no depth.
 - Skip the first second of brightness data and the first frame's exposure metadata.
-- Rectification looks right by eye, but its metric accuracy is unproven.
+- An ordinary LED lamp adds no infrared light. Only the Leap's own LEDs light the scene.
 
-**Later phases:** Phase 3 needs Python 3.11 or later on the test Mac for Rerun, and it has 3.9.6. Phase 3 is also the first test of stereo processing alongside capture. Phase 4 adds the camera mount, and Phase 5 finishes the documentation. Tethered camera control stays out of scope for now.
+**Later phases:** Phase 4 adds the camera mount, and Phase 5 finishes the documentation. Tethered camera control stays out of scope for now.
 
 Diagrams of the architecture, frame pipeline, startup sequence, Phase 0 decisions, data structures and control map are on the [design canvas](https://claude.ai/artifact/F5Jw8hw83G4R3RoiXpKtsw). The link is private until shared.
 
@@ -105,7 +107,7 @@ Still to fix in Phase 2: `parseLeapCalibration` rectifies each camera to its own
 |---|---|
 | 0. Prove the path on hardware | Done: Path A confirmed |
 | 1. Capture and control port | Done |
-| 2. Metric stereo | Depth within 4% up to 1.1 m, far range still to measure |
+| 2. Metric stereo | Done: corrected depth within 1.5% from 0.25 to 2 m |
 | 3. Live point cloud | Not started |
 | 4. Camera mount | Not started |
 | 5. Documentation and handover | Not started |
@@ -354,6 +356,27 @@ Near runs are 0.255, 0.497 and 1.103 m. Scale and offset are fitted on those thr
 Up to about 1.1 m, depth is within 4%. That's good enough for judging scene layout. The remaining +0.26 px surplus would make readings slightly short and isn't corrected, because it comes from one unit and three runs.
 
 Beyond 1.5 m, the frames were too dark: digital gain was at its maximum, and analog gain and longer exposure weren't tried. The 2 m error mostly reflects noise, so the far range still needs measuring with better exposure. The LEDs light only nearby objects, so expect usable depth to about 1.5 m indoors.
+
+### Phase 2 result: corrected depth accuracy, 2026-11-07
+
+Better-exposed far runs, with 8000 µs exposure and analog gain 40, showed the same small error as the near runs. With no rotation, disparity reads high by a constant amount at every distance. Fitting that offset alone, with scale fixed at 1, over the five well-exposed runs gives **+0.168 px, with a spread of 0.053 px**. A free fit gives scale 0.993 and offset +0.22 px, which agrees. Rows align to a median of 0.09 px.
+
+| Laser | Uncorrected | Error | Corrected for 0.168 px | Error | Frame-to-frame spread |
+|---|---|---|---|---|---|
+| 0.255 m | 0.254 m | −0.3% | 0.256 m | +0.5% | 0.002 m |
+| 0.497 m | 0.488 m | −1.9% | 0.495 m | −0.3% | under 0.001 m |
+| 1.103 m | 1.060 m | −3.9% | 1.097 m | −0.6% | 0.04 m |
+| 1.493 m | 1.425 m | −4.5% | 1.492 m | −0.1% | 0.08 m |
+| 2.035 m | 1.887 m | −7.3% | 2.006 m | −1.4% | 0.40 m |
+
+Corrected values use each run's averaged disparity from `rectify_variants.py`, so they differ slightly from depth_test's medians, which step in 1/16 px.
+
+**Corrected depth is within 1.5% from 0.25 to 2 m.** Two cautions:
+
+- **The offset was fitted on these same five runs,** so this table shows consistency, not an independent check. It's also one unit's value. Each Leap should fit its own with `tools/rectify_variants.py`, then pass it as `disparity_offset_px` or `--disparity-offset`.
+- **Single frames get noisy with distance:** about ±4 cm at 1.1 m, ±8 cm at 1.5 m and ±40 cm at 2 m. Phase 3 should average over frames, or over regions, to use depth beyond about 1.5 m.
+
+**Exposure depends on distance.** Close targets need low gain, or the LED hotspot saturates them, as at 0.255 m and 1.493 m. Far ones need analog gain. A single fixed setting won't suit both, so Phase 3 needs automatic exposure, or settings chosen per scene.
 
 **Other notes:**
 

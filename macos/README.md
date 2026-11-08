@@ -2,7 +2,7 @@
 
 This folder is the Apple Silicon port of LeapUVC. The goal is a live 3D point cloud from an unlocked Leap Motion Controller, to help judge scene layout for a mirrorless camera.
 
-**Status:** Phase 1 is complete. On an unlocked Leap, the capture library streams at 57.55 FPS without root, and `minimumExample` and `cameraControlExample` run unedited. Metric depth is next.
+**Status:** Phase 2 is complete. On an unlocked Leap, the capture library streams at 57.55 FPS without root, the examples run unedited, and corrected depth is within 1.5% from 0.25 to 2 m. The live point cloud is next.
 
 Design notes and results are in [docs/macos-port.md](../docs/macos-port.md).
 
@@ -109,7 +109,15 @@ Place a flat, textured target square-on and centred, then measure from the Leap'
 .venv/bin/python tools/depth_test.py --distance 1.0 --preview
 ```
 
-Press space to measure, or `q` to cancel. To print the error table:
+Press space to measure, or `q` to cancel. In dim scenes, add `--exposure 8000 --gain 40`. If a close target turns white in the centre, lower `--digital-gain`.
+
+Each Leap reads disparity slightly off by a small constant amount. After measuring a few distances, fit yours from the saved runs, then pass it to later tests as `--disparity-offset`. The test unit's was 0.168 px.
+
+```bash
+.venv/bin/python tools/rectify_variants.py
+```
+
+To print the error table:
 
 ```bash
 .venv/bin/python tools/depth_test.py --summary
