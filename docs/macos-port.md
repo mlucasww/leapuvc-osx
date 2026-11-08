@@ -4,7 +4,7 @@ This records why the port is built the way it is and what testing found. Setup a
 
 ## Restarting this work
 
-**Where it stands:** Phases 0 and 1 are complete. The Leap streams natively on Apple Silicon at 57.55 FPS with no root, and the Python library and examples work. Phase 2, metric stereo, is next and hasn't been started.
+**Where it stands:** Phases 0, 1 and 2 are complete. The Leap streams natively on Apple Silicon at 57.55 FPS with no root, the Python library and examples work, and corrected depth is within 1.5% from 0.25 to 2 m on the test unit. Phase 3, the live point cloud, is next.
 
 **Ground rules, which still apply:**
 
@@ -34,22 +34,24 @@ This records why the port is built the way it is and what testing found. Setup a
    .venv/bin/python tools/stream_test.py --seconds 10
    ```
 
-**Next: Phase 2, metric stereo**
+**Next: Phase 3, live point cloud**
 
-1. Add `macos/leapmac/stereo.py`, building a `StereoRig` from the calibration: one shared rectified camera matrix for both cameras, plus `Q` from the 39.87 mm baseline. `parseLeapCalibration` still gives each camera its own matrix, which is fine for a preview but wrong for metric depth.
-2. Compute disparity with `cv2.StereoSGBM` at 640×480, and convert it to metres.
-3. Run a tape-measure test at 0.5, 1, 2 and 3 m, using a flat, textured target. Publish the measured error table, replacing the estimates in the plan.
+1. Build `macos/leapmac/cloud.py` on `StereoRig`, using no rotation by default and the test unit's `disparity_offset_px` of 0.168. Reproject depth to points, filter them, and apply a maximum range.
+2. Stream the cloud to Rerun, and add PLY snapshots.
+3. Average over frames, or regions, to steady depth beyond about 1.5 m.
+4. Handle exposure by distance: close targets saturate at high gain, and far ones need analog gain.
+5. Exit check: at least 10 FPS at 640×480 on the test Mac, with latency measured. SGBM took about 12 ms per frame in Phase 2.
 
-**Phase 2 needs from the user:** a tape measure, a flat textured target, and someone at the test Mac.
+**Phase 3 needs from the user:** Python 3.11 or later on the test Mac for Rerun, because it has 3.9.6. Install it from Homebrew or python.org, then rebuild the virtual environment.
 
-**Keep in mind for Phase 2:**
+**Keep in mind:**
 
 - Mount the Leap with its long edge horizontal and the green light at the bottom.
-- Prefer gain over long exposure, because exposure has a weak effect and long values cut the frame rate.
+- Depth needs a textured scene. Plain walls and glossy surfaces give no depth.
 - Skip the first second of brightness data and the first frame's exposure metadata.
-- Rectification looks right by eye, but its metric accuracy is unproven.
+- An ordinary LED lamp adds no infrared light. Only the Leap's own LEDs light the scene.
 
-**Later phases:** Phase 3 needs Python 3.11 or later on the test Mac for Rerun, and it has 3.9.6. Phase 3 is also the first test of stereo processing alongside capture. Phase 4 adds the camera mount, and Phase 5 finishes the documentation. Tethered camera control stays out of scope for now.
+**Later phases:** Phase 4 adds the camera mount, and Phase 5 finishes the documentation. Tethered camera control stays out of scope for now.
 
 Diagrams of the architecture, frame pipeline, startup sequence, Phase 0 decisions, data structures and control map are on the [design canvas](https://claude.ai/artifact/F5Jw8hw83G4R3RoiXpKtsw). The link is private until shared.
 
@@ -105,7 +107,7 @@ Still to fix in Phase 2: `parseLeapCalibration` rectifies each camera to its own
 |---|---|
 | 0. Prove the path on hardware | Done: Path A confirmed |
 | 1. Capture and control port | Done |
-| 2. Metric stereo | Not started |
+| 2. Metric stereo | Done: corrected depth within 1.5% from 0.25 to 2 m |
 | 3. Live point cloud | Not started |
 | 4. Camera mount | Not started |
 | 5. Documentation and handover | Not started |
@@ -271,6 +273,115 @@ Phase 1 is complete at commit `1b71a2d`. All 88 unit tests pass, and both exit c
 - **The earlier black image isn't fully closed.** That run ended at digital gain 7, which should show a picture, and we don't know whether it recovered at the time. The fixed run never went black, which argues against a second cause without proving it.
 - **The soak predates the control fixes.** They only touch startup and value limits, but the 10-minute run wasn't repeated.
 - **`stereoExample` hasn't been run on macOS.** Phase 2 replaces its role.
+
+### Phase 2 first measurements, 2026-11-05
+
+The Leap faced down at a table, with an 8.5 × 11 in sheet of paper as the target. Distances are from the Leap's front face, at commit `18d861c`, default exposure and gain:
+
+| True distance | SGBM depth | Error | Correlation disparity | Expected disparity | Row offset |
+|---|---|---|---|---|---|
+| 0.592 m | 0.662 m | +11.9% | 8.30 px | 9.02 px | 0.8 px |
+| 0.837 m | 0.939 m | +12.3% | 5.60 px | 6.38 px | 0.6 px |
+
+A first run at 0.592 m read 0.780 m, but a glossy LED reflection in the centre pulled its median, so it's excluded.
+
+**What the evidence says:**
+
+- **Focal length is right.** Sizing the paper gives distances within about 2%.
+- **Disparity is short by 0.7 to 1 px.** This could be a scale error of about 0.89, equivalent to a 35.6 mm baseline, or a constant offset. Two distances can't tell them apart.
+- **Rows are off by 0.6 to 0.8 px,** so rectification isn't fully aligned.
+- **The alignment check returned nothing:** frames had a mean brightness of about 10 out of 255, too dark for feature matching.
+- **The stream ran 57.35 FPS** in a 10-second check, with one 52 ms gap.
+
+**Leading suspect: the rotation convention.** The factory rotations differ between the cameras by about 0.006 rad about the vertical axis. At 134 px focal length that's 0.8 px of disparity, the size of the error. If the sign is wrong, or the Cayley transform's factor of 2 is, rectification would leave this error behind. The blob's per-camera `center` values are unused, but they differ by 5.7 px in x, far more than the error, so they're a weaker suspect.
+
+**Next:** `depth_test.py` now saves raw frames, measures disparity and row offset by correlation, and takes exposure and gain settings for dark scenes. `tools/rectify_variants.py` then scores each geometry reading against the tape measure offline. A run near 1.5 m would also separate scale from offset, with a predicted 1.68 m for scale or 1.90 m for offset.
+
+A setup diagram from that session is at https://claude.ai/artifact/936KBzGDR5MTefsq35rgdL.
+
+### Wall measurements, 2026-11-07
+
+The Leap was on a tripod, mounted horizontally with the green light at the bottom. It faced a crumpled-paper patch about 95 px across taped to a wall, and distances came from a laser tape. Settings were 4000 µs exposure, with digital gain 4 to 15 to keep brightness up. Instructions are at https://claude.ai/artifact/TzfGTVvLNQ8nxFJk5oRU7c.
+
+These use factory rectification and SGBM. Medians step in 1/16 px.
+
+| True | Measured | Error | Disparity | Expected | Shortfall |
+|---|---|---|---|---|---|
+| 0.255 m | 0.267 m | +4.7% | 20.00 px | 20.94 px | 0.95 px |
+| 0.497 m | 0.534 m | +7.5% | 10.00 px | 10.75 px | 0.75 px |
+| 1.103 m | 1.285 m | +16.5% | 4.16 px | 4.84 px | 0.69 px |
+| 1.536 m | 1.709 to 1.744 m | +11 to +14% | 3.06 to 3.13 px | 3.48 px | 0.35 to 0.41 px |
+| 2.027 m | 2.035 m | +0.4% | 2.63 px | 2.63 px | 0.01 px |
+
+**The shortfall is a roughly constant offset, not a scale error.** It stays at 0.7 to 0.9 px up to 1.1 m. A 0.89 scale error would mean a 2.3 px shortfall at 0.255 m. Past 1.5 m the runs are too noisy to judge: frame-to-frame spread was 0.14 to 0.6 m, and frames were dark even at maximum digital gain. Analog gain and longer exposure weren't tried.
+
+**Leaving the rotation out looked best on the one reliable run,** at 0.497 m:
+
+| Geometry | Error | Row offset |
+|---|---|---|
+| Factory rotation | +10.6% | 0.44 px |
+| Transposed | −5.7% | −0.22 px |
+| No rotation | +0.9% | 0.0 px |
+| With `center` offsets | over +500% | — |
+
+The `center` offsets are clearly wrong as a reading. The rest of the variant scores came from a correlation window too small for the patch and for near disparities, so they were noise. The tool now scores each variant with SGBM, and fits scale and offset across distances.
+
+### Decision: leave out the factory rotation
+
+Rescoring the six kept wall runs with SGBM, under each geometry reading, gave this. Scale and offset fit measured against expected disparity. Rows are the median row offset.
+
+| Geometry | Scale | Offset | Median error, near runs | Rows |
+|---|---|---|---|---|
+| **No rotation** | 0.99 | +0.26 px | **1.9%** | **0.10 px** |
+| Factory rotation | 0.98 | −0.55 px | 7.9% | 0.65 px |
+| Transposed | 1.00 | +1.01 px | 8.7% | 0.43 px |
+| With `center` offsets | 0.99 | +5 to +7 px | over 30% | 0.4 to 0.65 px |
+
+Near runs are 0.255, 0.497 and 1.103 m. Scale and offset are fitted on those three.
+
+**`StereoRig` now leaves the factory rotation out by default.** Every reading has a scale near 1, so the error was always an offset. Factory and transposed land almost symmetrically either side of no rotation. That suggests the stored rotation is either already applied in the image, or uses a convention we can't reproduce. The `center` values add about 5 px whichever way they're applied, so they aren't meant for this.
+
+`parseLeapCalibration`, shared with Windows and Linux, still applies the factory rotation for its preview maps. That's unchanged, because it's untested on those platforms.
+
+**Depth accuracy with no rotation, one unit, against a laser tape:**
+
+| True distance | Leap reading | Error | Notes |
+|---|---|---|---|
+| 0.255 m | 0.256 m | −0.3% | |
+| 0.497 m | 0.488 m | −1.9% | |
+| 1.103 m | 1.060 m | −3.9% | |
+| 1.536 m | 1.37 to 1.39 m | −9 to −11% | Under-lit, noisy |
+| 2.027 m | 1.67 m | −18% | Under-lit, very noisy |
+
+Up to about 1.1 m, depth is within 4%. That's good enough for judging scene layout. The remaining +0.26 px surplus would make readings slightly short and isn't corrected, because it comes from one unit and three runs.
+
+Beyond 1.5 m, the frames were too dark: digital gain was at its maximum, and analog gain and longer exposure weren't tried. The 2 m error mostly reflects noise, so the far range still needs measuring with better exposure. The LEDs light only nearby objects, so expect usable depth to about 1.5 m indoors.
+
+### Phase 2 result: corrected depth accuracy, 2026-11-07
+
+Better-exposed far runs, with 8000 µs exposure and analog gain 40, showed the same small error as the near runs. With no rotation, disparity reads high by a constant amount at every distance. Fitting that offset alone, with scale fixed at 1, over the five well-exposed runs gives **+0.168 px, with a spread of 0.053 px**. A free fit gives scale 0.993 and offset +0.22 px, which agrees. Rows align to a median of 0.09 px.
+
+| Laser | Uncorrected | Error | Corrected for 0.168 px | Error | Frame-to-frame spread |
+|---|---|---|---|---|---|
+| 0.255 m | 0.254 m | −0.3% | 0.256 m | +0.5% | 0.002 m |
+| 0.497 m | 0.488 m | −1.9% | 0.495 m | −0.3% | under 0.001 m |
+| 1.103 m | 1.060 m | −3.9% | 1.097 m | −0.6% | 0.04 m |
+| 1.493 m | 1.425 m | −4.5% | 1.492 m | −0.1% | 0.08 m |
+| 2.035 m | 1.887 m | −7.3% | 2.006 m | −1.4% | 0.40 m |
+
+Corrected values use each run's averaged disparity from `rectify_variants.py`, so they differ slightly from depth_test's medians, which step in 1/16 px.
+
+**Corrected depth is within 1.5% from 0.25 to 2 m.** Two cautions:
+
+- **The offset was fitted on these same five runs,** so this table shows consistency, not an independent check. It's also one unit's value. Each Leap should fit its own with `tools/rectify_variants.py`, then pass it as `disparity_offset_px` or `--disparity-offset`.
+- **Single frames get noisy with distance:** about ±4 cm at 1.1 m, ±8 cm at 1.5 m and ±40 cm at 2 m. Phase 3 should average over frames, or over regions, to use depth beyond about 1.5 m.
+
+**Exposure depends on distance.** Close targets need low gain, or the LED hotspot saturates them, as at 0.255 m and 1.493 m. Far ones need analog gain. A single fixed setting won't suit both, so Phase 3 needs automatic exposure, or settings chosen per scene.
+
+**Other notes:**
+
+- A centred LED hotspot can saturate a close target, as at 0.255 m with gain 8. Lower the gain until the target shows texture.
+- An ordinary LED lamp adds no infrared light, so it doesn't help.
 
 ## Sources
 
