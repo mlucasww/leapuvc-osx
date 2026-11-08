@@ -4,7 +4,7 @@ This records why the port is built the way it is and what testing found. Setup a
 
 ## Restarting this work
 
-**Where it stands:** Phases 0 and 1 are complete. Phase 2 gives depth within 4% up to 1.1 m. Its branch, `macos-port-phase-2`, isn't merged, and two results aren't written up below yet: the far-range reruns at gain 40, and the 0.17 px offset fitted on all five wall runs. Phase 3, the live point cloud, is on `macos-port-phase-3`, built on Phase 2. On hardware it keeps up and places a 0.5 m target correctly, but this Leap slows to 45–53 FPS about 90 minutes after it's plugged in, so the soak can't reach 57.5 FPS for reasons outside Phase 3 (see [The Leap slows down after being plugged in](#the-leap-slows-down-after-being-plugged-in)).
+**Where it stands:** Phases 0 to 3 are complete. The Leap streams natively on Apple Silicon at 57.55 FPS with no root, the Python library and examples work, corrected depth is within 1.5% from 0.25 to 2 m on the test unit, and `tools/live_cloud.py` shows a live point cloud in Rerun at 30 clouds a second. One known issue is left open on purpose: the test Leap slows to 45–53 FPS about 90 minutes after it's plugged in (see [The Leap slows down after being plugged in](#the-leap-slows-down-after-being-plugged-in)). Phase 4, the camera mount, is next.
 
 **Ground rules, which still apply:**
 
@@ -32,9 +32,28 @@ This records why the port is built the way it is and what testing found. Setup a
 
    A run below 99% of the mode's rated rate isn't clean. If the Leap has been plugged in for more than an hour or so, replug it first.
 
-**Next:**
+3. Open the live point cloud, with the test unit's offset:
 
-1. Decide what to do about the slowdown: find its cause, live with replugging before long runs, or relax the soak's frame-rate requirement.
+   ```bash
+   .venv/bin/python tools/live_cloud.py --disparity-offset 0.168
+   ```
+
+**Next: Phase 4, camera mount.** Mount the Leap rigidly on the mirrorless camera, and work out how the Leap's coordinates relate to the camera's view.
+
+**Left over from Phase 3,** none of them needed for scene layout so far:
+
+- PLY snapshots of the cloud.
+- Averaging over frames, or regions, to steady depth beyond about 1.5 m.
+- Exposure chosen by distance: close targets saturate at high gain, and far ones need analog gain.
+- The cause of the Leap's slowdown. Replugging before a long run works around it.
+
+**Keep in mind:**
+
+- Mount the Leap with its long edge horizontal and the green light at the bottom.
+- Depth needs a textured scene. Plain walls and glossy surfaces give no depth.
+- Skip the first second of brightness data and the first frame's exposure metadata.
+- An ordinary LED lamp adds no infrared light. Only the Leap's own LEDs light the scene.
+- If the viewer stops showing new clouds, quit it and let the next run open a new one.
 
 **Later phases:** Phase 4 adds the camera mount, and Phase 5 finishes the documentation. Tethered camera control stays out of scope for now.
 
@@ -92,8 +111,8 @@ Still to fix in Phase 2: `parseLeapCalibration` rectifies each camera to its own
 |---|---|
 | 0. Prove the path on hardware | Done: Path A confirmed |
 | 1. Capture and control port | Done |
-| 2. Metric stereo | Depth within 4% up to 1.1 m, far range still to measure |
-| 3. Live point cloud | Keeps up on hardware, viewer updates live, 0.5 m target correct. The 57.5 FPS soak fails because the Leap slows down |
+| 2. Metric stereo | Done: corrected depth within 1.5% from 0.25 to 2 m |
+| 3. Live point cloud | Done: 30 clouds a second live, nothing skipped. The Leap's slowdown is a known issue |
 | 4. Camera mount | Not started |
 | 5. Documentation and handover | Not started |
 
@@ -342,6 +361,27 @@ Up to about 1.1 m, depth is within 4%. That's good enough for judging scene layo
 
 Beyond 1.5 m, the frames were too dark: digital gain was at its maximum, and analog gain and longer exposure weren't tried. The 2 m error mostly reflects noise, so the far range still needs measuring with better exposure. The LEDs light only nearby objects, so expect usable depth to about 1.5 m indoors.
 
+### Phase 2 result: corrected depth accuracy, 2026-11-07
+
+Better-exposed far runs, with 8000 µs exposure and analog gain 40, showed the same small error as the near runs. With no rotation, disparity reads high by a constant amount at every distance. Fitting that offset alone, with scale fixed at 1, over the five well-exposed runs gives **+0.168 px, with a spread of 0.053 px**. A free fit gives scale 0.993 and offset +0.22 px, which agrees. Rows align to a median of 0.09 px.
+
+| Laser | Uncorrected | Error | Corrected for 0.168 px | Error | Frame-to-frame spread |
+|---|---|---|---|---|---|
+| 0.255 m | 0.254 m | −0.3% | 0.256 m | +0.5% | 0.002 m |
+| 0.497 m | 0.488 m | −1.9% | 0.495 m | −0.3% | under 0.001 m |
+| 1.103 m | 1.060 m | −3.9% | 1.097 m | −0.6% | 0.04 m |
+| 1.493 m | 1.425 m | −4.5% | 1.492 m | −0.1% | 0.08 m |
+| 2.035 m | 1.887 m | −7.3% | 2.006 m | −1.4% | 0.40 m |
+
+Corrected values use each run's averaged disparity from `rectify_variants.py`, so they differ slightly from depth_test's medians, which step in 1/16 px.
+
+**Corrected depth is within 1.5% from 0.25 to 2 m.** Two cautions:
+
+- **The offset was fitted on these same five runs,** so this table shows consistency, not an independent check. It's also one unit's value. Each Leap should fit its own with `tools/rectify_variants.py`, then pass it as `disparity_offset_px` or `--disparity-offset`.
+- **Single frames get noisy with distance:** about ±4 cm at 1.1 m, ±8 cm at 1.5 m and ±40 cm at 2 m. Phase 3 should average over frames, or over regions, to use depth beyond about 1.5 m.
+
+**Exposure depends on distance.** Close targets need low gain, or the LED hotspot saturates them, as at 0.255 m and 1.493 m. Far ones need analog gain. A single fixed setting won't suit both, so Phase 3 needs automatic exposure, or settings chosen per scene.
+
 **Other notes:**
 
 - A centred LED hotspot can saturate a close target, as at 0.255 m with gain 8. Lower the gain until the target shows texture.
@@ -386,7 +426,7 @@ The first soak, on 2026-11-07, skipped 6 frames with a 168 ms gap. That came fro
 - Depth error grows with the square of distance, so a quarter-pixel matching error is about ±1.2 cm at 0.5 m but about ±5 cm at 1 m. Single-frame points spread along the line of sight.
 - The lens is very wide, so a 20 cm object at 1 m covers about 27 px, or 13 points across at the default stride of 2.
 
-Phase 2's "within 4% to 1.1 m" still holds, because it took a median over a region and over several frames. Averaging disparity over a few frames, for a still scene, would be the cheapest improvement if the far range matters.
+Phase 2's "within 1.5% to 2 m" still holds, because it took a median over a region and over several frames. Averaging disparity over a few frames, for a still scene, would be the cheapest improvement if the far range matters.
 
 ### Viewer
 

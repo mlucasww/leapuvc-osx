@@ -2,7 +2,7 @@
 
 This folder is the Apple Silicon port of LeapUVC. The goal is a live 3D point cloud from an unlocked Leap Motion Controller, to help judge scene layout for a mirrorless camera.
 
-**Status:** On an unlocked Leap, the capture library streams at 57.55 FPS without root, and metric depth is within 4% up to 1.1 m. Phase 3, the live point cloud, keeps up on hardware. The test Leap slows to 45–53 FPS about 90 minutes after it's plugged in, so replug it before a long run (see [docs/macos-port.md](../docs/macos-port.md#the-leap-slows-down-after-being-plugged-in)).
+**Status:** Phase 3 is complete. On an unlocked Leap, the capture library streams at 57.55 FPS without root, the examples run unedited, corrected depth is within 1.5% from 0.25 to 2 m, and `tools/live_cloud.py` shows a live point cloud in Rerun. The test Leap slows to 45–53 FPS about 90 minutes after it's plugged in, so replug it before a long run (see [docs/macos-port.md](../docs/macos-port.md#the-leap-slows-down-after-being-plugged-in)).
 
 Design notes and results are in [docs/macos-port.md](../docs/macos-port.md).
 
@@ -117,7 +117,7 @@ The tool takes the same exposure and gain options as `depth_test.py`, plus these
 
 | Option | Default | Effect |
 |---|---|---|
-| `--disparity-offset` | 0 | This unit's fitted offset in pixels. The test unit measured about 0.17 |
+| `--disparity-offset` | 0 | This unit's fitted offset in pixels. The test unit's is 0.168 |
 | `--rate` | 30 | Most clouds per second. Capture keeps every frame either way, and 0 processes every frame |
 | `--min-depth`, `--max-depth` | 0.1, 2.5 | Depth range kept, in metres |
 | `--stride` | 2 | Keep every nth pixel in each direction |
@@ -142,7 +142,15 @@ Place a flat, textured target square-on and centred, then measure from the Leap'
 .venv/bin/python tools/depth_test.py --distance 1.0 --preview
 ```
 
-Press space to measure, or `q` to cancel. To print the error table:
+Press space to measure, or `q` to cancel. In dim scenes, add `--exposure 8000 --gain 40`. If a close target turns white in the centre, lower `--digital-gain`.
+
+Each Leap reads disparity slightly off by a small constant amount. After measuring a few distances, fit yours from the saved runs, then pass it to later tests as `--disparity-offset`. The test unit's was 0.168 px.
+
+```bash
+.venv/bin/python tools/rectify_variants.py
+```
+
+To print the error table:
 
 ```bash
 .venv/bin/python tools/depth_test.py --summary

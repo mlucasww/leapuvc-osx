@@ -71,7 +71,7 @@ def parse_args():
         "--disparity-offset",
         type=float,
         default=0.0,
-        help="this unit's fitted disparity offset in px; the Phase 2 test unit measured about 0.17",
+        help="this unit's fitted disparity offset in px; the Phase 2 test unit measured 0.168",
     )
     parser.add_argument("--min-depth", type=float, default=pointcloud.DEFAULT_MIN_DEPTH_M, help="metres")
     parser.add_argument("--max-depth", type=float, default=pointcloud.DEFAULT_MAX_DEPTH_M, help="metres")
