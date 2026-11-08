@@ -105,7 +105,7 @@ Still to fix in Phase 2: `parseLeapCalibration` rectifies each camera to its own
 |---|---|
 | 0. Prove the path on hardware | Done: Path A confirmed |
 | 1. Capture and control port | Done |
-| 2. Metric stereo | Code written, not yet run |
+| 2. Metric stereo | Depth within 4% up to 1.1 m, far range still to measure |
 | 3. Live point cloud | Not started |
 | 4. Camera mount | Not started |
 | 5. Documentation and handover | Not started |
@@ -323,6 +323,37 @@ These use factory rectification and SGBM. Medians step in 1/16 px.
 | With `center` offsets | over +500% | — |
 
 The `center` offsets are clearly wrong as a reading. The rest of the variant scores came from a correlation window too small for the patch and for near disparities, so they were noise. The tool now scores each variant with SGBM, and fits scale and offset across distances.
+
+### Decision: leave out the factory rotation
+
+Rescoring the six kept wall runs with SGBM, under each geometry reading, gave this. Scale and offset fit measured against expected disparity. Rows are the median row offset.
+
+| Geometry | Scale | Offset | Median error, near runs | Rows |
+|---|---|---|---|---|
+| **No rotation** | 0.99 | +0.26 px | **1.9%** | **0.10 px** |
+| Factory rotation | 0.98 | −0.55 px | 7.9% | 0.65 px |
+| Transposed | 1.00 | +1.01 px | 8.7% | 0.43 px |
+| With `center` offsets | 0.99 | +5 to +7 px | over 30% | 0.4 to 0.65 px |
+
+Near runs are 0.255, 0.497 and 1.103 m. Scale and offset are fitted on those three.
+
+**`StereoRig` now leaves the factory rotation out by default.** Every reading has a scale near 1, so the error was always an offset. Factory and transposed land almost symmetrically either side of no rotation. That suggests the stored rotation is either already applied in the image, or uses a convention we can't reproduce. The `center` values add about 5 px whichever way they're applied, so they aren't meant for this.
+
+`parseLeapCalibration`, shared with Windows and Linux, still applies the factory rotation for its preview maps. That's unchanged, because it's untested on those platforms.
+
+**Depth accuracy with no rotation, one unit, against a laser tape:**
+
+| True distance | Leap reading | Error | Notes |
+|---|---|---|---|
+| 0.255 m | 0.256 m | −0.3% | |
+| 0.497 m | 0.488 m | −1.9% | |
+| 1.103 m | 1.060 m | −3.9% | |
+| 1.536 m | 1.37 to 1.39 m | −9 to −11% | Under-lit, noisy |
+| 2.027 m | 1.67 m | −18% | Under-lit, very noisy |
+
+Up to about 1.1 m, depth is within 4%. That's good enough for judging scene layout. The remaining +0.26 px surplus would make readings slightly short and isn't corrected, because it comes from one unit and three runs.
+
+Beyond 1.5 m, the frames were too dark: digital gain was at its maximum, and analog gain and longer exposure weren't tried. The 2 m error mostly reflects noise, so the far range still needs measuring with better exposure. The LEDs light only nearby objects, so expect usable depth to about 1.5 m indoors.
 
 **Other notes:**
 

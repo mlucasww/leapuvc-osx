@@ -2,7 +2,8 @@
 
 `parseLeapCalibration` rectifies each camera to its own camera matrix, which is
 fine for a preview. Metric depth needs both images to share one matrix, so that
-a point's disparity depends only on its distance. StereoRig builds those maps.
+a point's disparity depends only on its distance. StereoRig builds those maps,
+and by default leaves out the factory rotation, which measured worse.
 
 Coordinates follow the left rectified camera: x right, y down, z forward, in
 metres.
@@ -37,13 +38,18 @@ class StereoRig:
     right_maps: tuple
 
     @classmethod
-    def from_calibration(cls, calibration, resolution, rotation="factory", offsets=None):
+    def from_calibration(cls, calibration, resolution, rotation="identity", offsets=None):
         """Build shared rectification from a parseLeapCalibration result.
 
-        `rotation` and `offsets` exist to test alternative readings of the
-        factory geometry. "factory" uses each camera's stored rotation,
-        "transposed" its inverse and "identity" none. `offsets` maps a camera
-        name to a (dx, dy) shift, in pixels, of that camera's rectified image.
+        `rotation` chooses how to use each camera's stored factory rotation:
+        "identity" leaves it out, "factory" applies it, and "transposed"
+        applies its inverse. Identity is the default because it measured best:
+        on tape-measured wall runs it aligned rows to about 0.1 px, against
+        0.65 px with the factory rotation, and cut the near-range depth error
+        from about 8% to 2%. See docs/macos-port.md.
+
+        `offsets` maps a camera name to a (dx, dy) shift, in pixels, of that
+        camera's rectified image, for testing other readings of the geometry.
         """
         width, height = resolution
         baseline_m = float(calibration["baseline"]) / 1000.0

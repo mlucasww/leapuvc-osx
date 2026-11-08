@@ -188,13 +188,21 @@ def test_rotation_modes_differ_only_when_rotation_is_present():
         [[np.cos(angle), 0, np.sin(angle)], [0, 1, 0], [-np.sin(angle), 0, np.cos(angle)]],
         dtype=np.float32,
     )
-    factory = stereo.StereoRig.from_calibration(tilted, (WIDTH, HEIGHT))
+    factory = stereo.StereoRig.from_calibration(tilted, (WIDTH, HEIGHT), rotation="factory")
     transposed = stereo.StereoRig.from_calibration(tilted, (WIDTH, HEIGHT), rotation="transposed")
     identity = stereo.StereoRig.from_calibration(calibration(), (WIDTH, HEIGHT), rotation="identity")
-    plain = stereo.StereoRig.from_calibration(calibration(), (WIDTH, HEIGHT))
+    plain = stereo.StereoRig.from_calibration(calibration(), (WIDTH, HEIGHT), rotation="factory")
 
     assert not np.array_equal(factory.left_maps[0], transposed.left_maps[0])
     assert np.array_equal(identity.left_maps[0], plain.left_maps[0])
+
+
+def test_default_leaves_out_the_factory_rotation():
+    tilted = calibration()
+    tilted["left"]["extrinsics"]["r"] = np.array([[1, 0, 0.02], [0, 1, 0], [-0.02, 0, 1]], dtype=np.float32)
+    default = stereo.StereoRig.from_calibration(tilted, (WIDTH, HEIGHT))
+    identity = stereo.StereoRig.from_calibration(tilted, (WIDTH, HEIGHT), rotation="identity")
+    assert np.array_equal(default.left_maps[0], identity.left_maps[0])
 
 
 def test_unknown_rotation_mode_is_rejected():
