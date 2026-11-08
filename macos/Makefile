@@ -1,10 +1,11 @@
 # Run these on the Sequoia test Mac, from the macos/ folder.
 
 SWIFTC ?= swiftc
-PYTHON ?= python3
+# Rerun needs 3.11 or later; the system python3 is 3.9.
+PYTHON ?= python3.12
 VENV   ?= .venv
 
-.PHONY: all setup leapcap test probe clean
+.PHONY: all setup leapcap test probe cloud clean
 
 all: leapcap
 
@@ -23,6 +24,9 @@ test:
 
 probe: build/leapcap
 	$(VENV)/bin/python tools/probe_leap.py
+
+cloud: build/leapcap
+	$(VENV)/bin/python tools/live_cloud.py
 
 clean:
 	rm -rf build

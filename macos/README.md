@@ -2,7 +2,7 @@
 
 This folder is the Apple Silicon port of LeapUVC. The goal is a live 3D point cloud from an unlocked Leap Motion Controller, to help judge scene layout for a mirrorless camera.
 
-**Status:** Phase 2 is complete. On an unlocked Leap, the capture library streams at 57.55 FPS without root, the examples run unedited, and corrected depth is within 1.5% from 0.25 to 2 m. The live point cloud is next.
+**Status:** Phase 3 is complete. On an unlocked Leap, the capture library streams at 57.55 FPS without root, the examples run unedited, corrected depth is within 1.5% from 0.25 to 2 m, and `tools/live_cloud.py` shows a live point cloud in Rerun. The test Leap slows to 45–53 FPS about 90 minutes after it's plugged in, so replug it before a long run (see [docs/macos-port.md](../docs/macos-port.md#the-leap-slows-down-after-being-plugged-in)).
 
 Design notes and results are in [docs/macos-port.md](../docs/macos-port.md).
 
@@ -10,7 +10,7 @@ Design notes and results are in [docs/macos-port.md](../docs/macos-port.md).
 
 - A Mac running macOS Sequoia on Apple Silicon
 - An unlocked Leap Motion Controller, plugged in directly rather than through a hub. On Windows, right-click `LeapUVC Firmware Tools/UnlockDevice.exe` and choose **Run as administrator**. Without that, it can exit quietly and change nothing. The Windows Camera app then confirms the unlock: it should show an image, usually green and magenta. A locked Leap still accepts controls and returns calibration, but it never sends video.
-- Xcode Command Line Tools, Homebrew and Python 3.11 or later
+- Xcode Command Line Tools, Homebrew and Python 3.11 or later. The Makefile uses Homebrew's `python3.12`, because macOS's own `python3` is 3.9
 
 Quit any other software that might use the camera, including Leap or Ultraleap services.
 
@@ -23,7 +23,7 @@ xcode-select --install
 ```
 
 ```bash
-brew install libusb
+brew install libusb python@3.12
 ```
 
 ```bash
@@ -99,7 +99,40 @@ To check the stream, count every frame for 10 minutes:
 .venv/bin/python tools/stream_test.py --seconds 600
 ```
 
+A clean run loses no frames and reaches 99% of the mode's rated frame rate, 57.5 FPS at 640×480.
+
 Mount the Leap with its long edge horizontal and the green light at the bottom, which gives an upright image.
+
+## Show the live point cloud
+
+Run this from Terminal.app:
+
+```bash
+make cloud
+```
+
+The Rerun viewer opens with the 3D cloud, the rectified left image, the depth image, and plots of rates and processing time. Press Ctrl-C in Terminal to stop. Each run writes `probe_out/cloud-<timestamp>.json`, and `capture_clean` in it says whether capture lost anything while stereo ran and kept at least 57 FPS. `capture.fps_by_minute` shows when a slowdown started.
+
+The tool takes the same exposure and gain options as `depth_test.py`, plus these:
+
+| Option | Default | Effect |
+|---|---|---|
+| `--disparity-offset` | 0 | This unit's fitted offset in pixels. The test unit's is 0.168 |
+| `--rate` | 30 | Most clouds per second. Capture keeps every frame either way, and 0 processes every frame |
+| `--min-depth`, `--max-depth` | 0.1, 2.5 | Depth range kept, in metres |
+| `--stride` | 2 | Keep every nth pixel in each direction |
+| `--seconds` | 0 | Stop after this long. 0 runs until Ctrl-C |
+| `--save` | none | Write an `.rrd` file instead of opening the viewer |
+| `--no-viewer` | off | Build clouds without sending them anywhere, to measure capture without Rerun |
+| `--single-thread` | off | Run SGBM on one core instead of all of them |
+
+To try it without a Leap, replay frames saved by `depth_test.py`:
+
+```bash
+.venv/bin/python tools/live_cloud.py --replay probe_out/depth-20261107-155252/raw.npz
+```
+
+Rerun collects anonymous usage data from its viewer. To turn that off, run `.venv/bin/rerun analytics disable`.
 
 ## Measure depth accuracy
 
@@ -153,6 +186,7 @@ Results go to `probe_out/bringup-<scenario>-<timestamp>/`. The sequence comes fr
 | `leapmac/calibration_cache.py` | Per-device calibration cache |
 | `leapmac/devices.py` | Finds the Leap among AVFoundation's cameras |
 | `leapmac/stereo.py` | Shared rectification, disparity and metric depth |
+| `leapmac/pointcloud.py` | Builds a point cloud from each stereo frame |
 | `leapmac/frames.py` | Frame decoding and image statistics |
 | `leapmac/uvc_descriptors.py` | USB descriptor parsing |
 | `leapmac/uvc_control.py` | UVC controls through libusb |
@@ -162,6 +196,7 @@ Results go to `probe_out/bringup-<scenario>-<timestamp>/`. The sequence comes fr
 | `tools/probe_leap.py` | The hardware probe |
 | `tools/run_example.py` | Runs the repo's Python examples unchanged on macOS |
 | `tools/stream_test.py` | Soak test that counts every frame |
+| `tools/live_cloud.py` | Live point cloud in the Rerun viewer |
 | `tools/depth_test.py` | Tape-measure test of depth accuracy |
 | `tools/rectify_variants.py` | Scores alternative geometry readings against saved runs |
 | `tools/bringup_test.py` | Tests whether a bring-up wakes the video stream |
