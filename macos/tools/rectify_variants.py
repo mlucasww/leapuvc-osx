@@ -86,8 +86,12 @@ def summarise(rows):
     fit = stereo.fit_scale_offset(
         [row["expected_px"] for row in scored], [row["disparity_px"] for row in scored]
     )
+    offset_only = stereo.fit_offset(
+        [row["expected_px"] for row in scored], [row["disparity_px"] for row in scored]
+    )
     return {
         "fit": fit,
+        "offset_only": offset_only,
         "median_abs_error_percent": round(float(np.median([abs(row["error_percent"]) for row in scored])), 2)
         if scored
         else None,
@@ -127,15 +131,21 @@ def main():
             rows.append(score(rig, matcher, frames, record))
         results[name] = {"summary": summarise(rows), "runs": rows}
 
-    print(f"{'variant':<20} {'scale':>7} {'offset px':>10} {'median |err| %':>15} {'median |row| px':>16}")
+    print(
+        f"{'variant':<20} {'scale':>7} {'offset px':>10} {'offset only':>12} {'spread':>7} "
+        f"{'median |err| %':>15} {'median |row| px':>16}"
+    )
     for name, result in results.items():
         summary = result["summary"]
         fit = summary["fit"] or {}
+        only = summary["offset_only"] or {}
         scale = f"{fit['scale']:.3f}" if fit else "-"
         offset = f"{fit['offset_px']:.3f}" if fit else "-"
+        offset_only = f"{only['offset_px']:.3f}" if only else "-"
+        spread = f"{only['spread_px']:.3f}" if only else "-"
         print(
-            f"{name:<20} {scale:>7} {offset:>10} {str(summary['median_abs_error_percent']):>15} "
-            f"{str(summary['median_abs_row_offset_px']):>16}"
+            f"{name:<20} {scale:>7} {offset:>10} {offset_only:>12} {spread:>7} "
+            f"{str(summary['median_abs_error_percent']):>15} {str(summary['median_abs_row_offset_px']):>16}"
         )
 
     out = ROOT / "probe_out" / f"variants-{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"

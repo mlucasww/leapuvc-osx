@@ -48,6 +48,7 @@ def parse_args():
     parser.add_argument("--gain", type=int, help="analog gain, 16 to 63")
     parser.add_argument("--digital-gain", type=int, help="digital gain, 4 to 15")
     parser.add_argument("--raw-frames", type=int, default=10, help="raw frames to save for offline analysis")
+    parser.add_argument("--disparity-offset", type=float, default=0.0, help="this unit's fitted disparity offset, in px")
     parser.add_argument("--out", type=Path, default=ROOT / "probe_out")
     args = parser.parse_args()
     if not args.summary and args.distance is None:
@@ -148,7 +149,12 @@ def measure(leap, rig, matcher, args):
         "recorded_at": datetime.now().isoformat(timespec="seconds"),
         "true_m": args.distance,
         "note": args.note,
-        "settings": {"exposure": args.exposure, "gain": args.gain, "digital_gain": args.digital_gain},
+        "settings": {
+            "exposure": args.exposure,
+            "gain": args.gain,
+            "digital_gain": args.digital_gain,
+            "disparity_offset_px": args.disparity_offset,
+        },
         "mean_brightness": round(float(raw[-1].mean()), 1),
         "expected_disparity_px": rig.fx * rig.baseline_m / args.distance,
         "region_shift": {
@@ -192,7 +198,9 @@ def main():
         return
 
     leap = capture.leapImageThread(resolution=RESOLUTION, timeout=30)
-    rig = stereo.StereoRig.from_calibration(leap.calibration, leap.resolution)
+    rig = stereo.StereoRig.from_calibration(
+        leap.calibration, leap.resolution, disparity_offset_px=args.disparity_offset
+    )
     matcher = stereo.make_matcher()
     leap.start()
     apply_settings(leap, args)

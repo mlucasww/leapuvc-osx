@@ -76,6 +76,18 @@ def test_depth_follows_focal_length_times_baseline():
     assert built.depth(np.float32(5.28)) == pytest.approx(1.0, rel=1e-3)
 
 
+def test_disparity_offset_is_removed_before_depth():
+    built = stereo.StereoRig.from_calibration(calibration(), (WIDTH, HEIGHT), disparity_offset_px=0.25)
+    assert built.depth(np.float32(5.28 + 0.25)) == pytest.approx(1.0, rel=1e-3)
+
+
+def test_fit_offset_averages_the_residuals():
+    fit = stereo.fit_offset([20.0, 10.0, 5.0], [20.3, 10.2, 5.25])
+    assert fit["offset_px"] == pytest.approx(0.25)
+    assert fit["runs"] == 3
+    assert stereo.fit_offset([], []) is None
+
+
 def test_depth_keeps_failed_pixels_as_nan():
     assert np.isnan(rig().depth(np.array([np.nan], dtype=np.float32))[0])
 

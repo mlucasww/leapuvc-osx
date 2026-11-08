@@ -36,9 +36,15 @@ class StereoRig:
     baseline_m: float
     left_maps: tuple
     right_maps: tuple
+    # Subtracted from every disparity before converting to depth. Each unit
+    # measures its own: the Phase 2 test unit read about 0.25 px too high at
+    # every distance. tools/rectify_variants.py fits it from tape-measured runs.
+    disparity_offset_px: float = 0.0
 
     @classmethod
-    def from_calibration(cls, calibration, resolution, rotation="identity", offsets=None):
+    def from_calibration(
+        cls, calibration, resolution, rotation="identity", offsets=None, disparity_offset_px=0.0
+    ):
         """Build shared rectification from a parseLeapCalibration result.
 
         `rotation` chooses how to use each camera's stored factory rotation:
@@ -84,7 +90,9 @@ class StereoRig:
                 (width, height),
                 cv2.CV_16SC2,
             )
-        return cls(width, height, fx, fy, cx, cy, baseline_m, maps["left"], maps["right"])
+        return cls(
+            width, height, fx, fy, cx, cy, baseline_m, maps["left"], maps["right"], float(disparity_offset_px)
+        )
 
     @property
     def camera_matrix(self):
@@ -110,8 +118,8 @@ class StereoRig:
         )
 
     def depth(self, disparity):
-        """Convert disparity in pixels to z in metres. NaN stays NaN."""
-        return self.fx * self.baseline_m / disparity
+        """Convert disparity in pixels to z in metres, after the unit's offset. NaN stays NaN."""
+        return self.fx * self.baseline_m / (disparity - self.disparity_offset_px)
 
     def points(self, disparity):
         """Return an H x W x 3 array of x, y, z in metres."""
@@ -197,6 +205,18 @@ def fit_scale_offset(expected_px, measured_px):
         return None
     scale, offset = np.polyfit(np.asarray(expected_px, float), np.asarray(measured_px, float), 1)
     return {"scale": float(scale), "offset_px": float(offset)}
+
+
+def fit_offset(expected_px, measured_px):
+    """Fit measured = expected + offset, assuming the scale is right."""
+    residuals = np.asarray(measured_px, float) - np.asarray(expected_px, float)
+    if residuals.size == 0:
+        return None
+    return {
+        "offset_px": float(residuals.mean()),
+        "spread_px": float(residuals.std()),
+        "runs": int(residuals.size),
+    }
 
 
 def region_shift(left, right, half_size):
