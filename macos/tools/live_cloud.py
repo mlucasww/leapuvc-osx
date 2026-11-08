@@ -100,7 +100,10 @@ def blueprint():
     )
 
 
-def start_rerun(args, rig):
+def start_rerun(args):
+    """Open the viewer or file. Call this before capture starts: a new viewer
+    can hold up Python for about 150 ms as it starts, longer than the ring's
+    four slots last, so the reader would skip frames."""
     rr.init("leapmac_live_cloud")
     if args.save:
         rr.save(args.save, default_blueprint=blueprint())
@@ -115,6 +118,8 @@ def start_rerun(args, rig):
             executable_path=str(viewer) if viewer.exists() else None,
         )
 
+
+def log_scene(rig):
     # The rig's frame is x right, y down, z forward.
     rr.log("world", rr.ViewCoordinates.RDF, static=True)
     rr.log(
@@ -272,6 +277,8 @@ def main():
         cv2.setNumThreads(1)
     stopping = []
     signal.signal(signal.SIGINT, lambda *_: stopping.append(True))
+    if not args.no_viewer:
+        start_rerun(args)
     source = ReplaySource(args) if args.replay else LiveSource(args)
 
     capture_rate, cloud_rate = pointcloud.RateMeter(), pointcloud.RateMeter()
@@ -287,7 +294,7 @@ def main():
         )
         builder = pointcloud.CloudBuilder(rig, settings)
         if not args.no_viewer:
-            start_rerun(args, rig)
+            log_scene(rig)
         started = time.monotonic()
         next_report = started + REPORT_EVERY_S
         next_cloud = started

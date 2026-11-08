@@ -34,8 +34,7 @@ This records why the port is built the way it is and what testing found. Setup a
 
 **Next:**
 
-1. Confirm the viewer updates smoothly at 30 clouds a second (`make cloud`). This is the one Phase 3 check not yet reported.
-2. Decide what to do about the slowdown: find its cause, live with replugging before long runs, or relax the soak's frame-rate requirement.
+1. Decide what to do about the slowdown: find its cause, live with replugging before long runs, or relax the soak's frame-rate requirement.
 
 **Later phases:** Phase 4 adds the camera mount, and Phase 5 finishes the documentation. Tethered camera control stays out of scope for now.
 
@@ -94,7 +93,7 @@ Still to fix in Phase 2: `parseLeapCalibration` rectifies each camera to its own
 | 0. Prove the path on hardware | Done: Path A confirmed |
 | 1. Capture and control port | Done |
 | 2. Metric stereo | Depth within 4% up to 1.1 m, far range still to measure |
-| 3. Live point cloud | Keeps up on hardware with nothing skipped, 0.5 m target correct. Viewer smoothness to confirm. The 57.5 FPS soak fails because the Leap slows down |
+| 3. Live point cloud | Keeps up on hardware, viewer updates live, 0.5 m target correct. The 57.5 FPS soak fails because the Leap slows down |
 | 4. Camera mount | Not started |
 | 5. Documentation and handover | Not started |
 
@@ -379,7 +378,7 @@ SGBM is most of the processing time. So the pipeline can keep up with every fram
 | Frames skipped by the reader, torn or dropped | 0, 0 and 0 |
 | Capture rate | 48.2 FPS, because the Leap had slowed down (below) |
 
-The first soak, on 2026-11-07, skipped 6 frames with a 168 ms gap, also while the Leap was slow. That didn't recur in the second soak or in shorter runs, so it isn't treated as a Phase 3 fault. Watch for it in later soaks.
+The first soak, on 2026-11-07, skipped 6 frames with a 168 ms gap. That came from opening the viewer, not from the pipeline (see [Viewer](#viewer)). The second soak reused an open viewer and skipped none.
 
 **Depth at measured distances.** A target at 0.5 m reads correctly in the viewer. A target at 1.0 m appears only as a rough cloud, which is expected for this short-range camera:
 
@@ -389,7 +388,11 @@ The first soak, on 2026-11-07, skipped 6 frames with a 168 ms gap, also while th
 
 Phase 2's "within 4% to 1.1 m" still holds, because it took a median over a region and over several frames. Averaging disparity over a few frames, for a still scene, would be the cheapest improvement if the far range matters.
 
-**Viewer smoothness** on screen hasn't been reported yet.
+### Viewer
+
+**A fresh viewer updates live** at 30 clouds a second. One viewer left open overnight, through several runs, stopped showing new clouds while the tool kept sending them. Quitting it and letting the next run open a new one fixed that. The likeliest cause is that the timeline stopped following the newest data after a click in it, which Rerun allows.
+
+**Opening a new viewer used to skip frames.** Every run that started a new viewer skipped 6 to 10 frames, with a gap of about 150 ms. Runs that reused an open one skipped none. The tool started capture before the viewer, and while the viewer started up nothing read the ring, whose four slots last about 70 ms. The viewer now opens before capture starts. The first run after the fix opened a new viewer and skipped nothing, with a largest gap of 19.6 ms, where the two runs just before it each skipped 7.
 
 ### The Leap slows down after being plugged in
 
