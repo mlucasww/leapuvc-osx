@@ -4,7 +4,7 @@ This records why the port is built the way it is and what testing found. Setup a
 
 ## Restarting this work
 
-**Where it stands:** Phases 0 and 1 are complete. The Leap streams natively on Apple Silicon at 57.55 FPS with no root, and the Python library and examples work. Phase 2, metric stereo, is next and hasn't been started.
+**Where it stands:** Phases 0 and 1 are complete. Phase 2 gives depth within 4% up to 1.1 m. Its branch, `macos-port-phase-2`, isn't merged, and two results aren't written up below yet: the far-range reruns at gain 40, and the 0.17 px offset fitted on all five wall runs. Phase 3, the live point cloud, is written on `macos-port-phase-3`, built on Phase 2, and waits for its hardware checks.
 
 **Ground rules, which still apply:**
 
@@ -16,17 +16,13 @@ This records why the port is built the way it is and what testing found. Setup a
 
 **To restart:**
 
-1. On the test Mac, get `master` and rebuild, from the `macos/` folder:
-
-   ```bash
-   git switch master && git pull
-   ```
+1. On the test Mac, from the `macos/` folder, rebuild. Setup now uses Homebrew's Python 3.12, which Rerun needs:
 
    ```bash
    make setup && make leapcap && make test
    ```
 
-   Expect 88 tests to pass.
+   Expect 134 tests to pass.
 
 2. Run a quick health check, which should report a clean run at about 57.55 FPS:
 
@@ -34,22 +30,13 @@ This records why the port is built the way it is and what testing found. Setup a
    .venv/bin/python tools/stream_test.py --seconds 10
    ```
 
-**Next: Phase 2, metric stereo**
+**Next: Phase 3 hardware checks.** Each runs from Terminal.app with the Leap on its tripod:
 
-1. Add `macos/leapmac/stereo.py`, building a `StereoRig` from the calibration: one shared rectified camera matrix for both cameras, plus `Q` from the 39.87 mm baseline. `parseLeapCalibration` still gives each camera its own matrix, which is fine for a preview but wrong for metric depth.
-2. Compute disparity with `cv2.StereoSGBM` at 640×480, and convert it to metres.
-3. Run a tape-measure test at 0.5, 1, 2 and 3 m, using a flat, textured target. Publish the measured error table, replacing the estimates in the plan.
+1. `make cloud` opens the viewer. Check the cloud looks like the room, and updates smoothly at 30 per second.
+2. A 10-minute soak with the viewer open: `.venv/bin/python tools/live_cloud.py --seconds 600 --disparity-offset 0.17`. The report's `capture_clean` must be true, at about 57.55 FPS.
+3. Place two objects at tape-measured distances, such as 0.5 and 1.0 m, and check their depth in the viewer.
 
-**Phase 2 needs from the user:** a tape measure, a flat textured target, and someone at the test Mac.
-
-**Keep in mind for Phase 2:**
-
-- Mount the Leap with its long edge horizontal and the green light at the bottom.
-- Prefer gain over long exposure, because exposure has a weak effect and long values cut the frame rate.
-- Skip the first second of brightness data and the first frame's exposure metadata.
-- Rectification looks right by eye, but its metric accuracy is unproven.
-
-**Later phases:** Phase 3 needs Python 3.11 or later on the test Mac for Rerun, and it has 3.9.6. Phase 3 is also the first test of stereo processing alongside capture. Phase 4 adds the camera mount, and Phase 5 finishes the documentation. Tethered camera control stays out of scope for now.
+**Later phases:** Phase 4 adds the camera mount, and Phase 5 finishes the documentation. Tethered camera control stays out of scope for now.
 
 Diagrams of the architecture, frame pipeline, startup sequence, Phase 0 decisions, data structures and control map are on the [design canvas](https://claude.ai/artifact/F5Jw8hw83G4R3RoiXpKtsw). The link is private until shared.
 
@@ -106,7 +93,7 @@ Still to fix in Phase 2: `parseLeapCalibration` rectifies each camera to its own
 | 0. Prove the path on hardware | Done: Path A confirmed |
 | 1. Capture and control port | Done |
 | 2. Metric stereo | Depth within 4% up to 1.1 m, far range still to measure |
-| 3. Live point cloud | Not started |
+| 3. Live point cloud | Written, keeps up with 57.5 FPS on replayed frames, hardware checks to run |
 | 4. Camera mount | Not started |
 | 5. Documentation and handover | Not started |
 
@@ -359,6 +346,26 @@ Beyond 1.5 m, the frames were too dark: digital gain was at its maximum, and ana
 
 - A centred LED hotspot can saturate a close target, as at 0.255 m with gain 8. Lower the gain until the target shows texture.
 - An ordinary LED lamp adds no infrared light, so it doesn't help.
+
+## Phase 3: live point cloud
+
+`leapmac/pointcloud.py` builds a cloud from each frame: rectify with `StereoRig`, match with SGBM, convert to depth after the unit's offset, keep 0.1 to 2.5 m, and keep every second pixel each way. `tools/live_cloud.py` runs it on the newest frame and logs the cloud, the rectified left image and the depth image to Rerun 0.42. Capture runs on its own thread and still counts every frame, so the report can say whether stereo work cost any.
+
+**Display rate is capped at 30 clouds a second.** Each cloud sends the viewer about 0.8 MB, so 30 a second is about 25 MB/s. The viewer is given 2 GB and drops the oldest data past that, which keeps about 80 seconds.
+
+### Replay benchmark, 2026-11-07
+
+Frames saved by `depth_test.py` at 0.497 m, replayed for 10 s on the test Mac, written to a file rather than a viewer:
+
+| Replay | Clouds per second | Processing, median | 95th percentile | Logging, median | Points per cloud |
+|---|---|---|---|---|---|
+| As fast as possible, every frame | 59.8 | 14.5 ms | 17.1 ms | 1.7 ms | about 38,000 |
+| 57.5 FPS, every frame | 57.5 | 14.4 ms | 16.9 ms | 1.8 ms | about 38,000 |
+| 57.5 FPS, capped at 30 | 30.0 | 14.3 ms | 15.3 ms | 1.9 ms | about 38,000 |
+
+SGBM is most of the processing time. So the pipeline can keep up with every frame, though with little headroom, which is one more reason for the cap.
+
+**Not yet shown:** that live capture stays clean with stereo and the viewer running alongside, that the viewer itself keeps up on screen, and that the cloud's geometry matches a measured scene. Those are the three hardware checks above.
 
 ## Sources
 
