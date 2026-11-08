@@ -618,6 +618,9 @@ func runStream(_ arguments: Arguments) -> Never {
     let sink = RingSink(ring: ring, maxFrames: arguments.int("--max-frames", default: 0))
 
     // Closing stdin stops streaming, so a crashed parent can't leave the camera held.
+    // Ctrl-C in Terminal reaches the whole process group. Ignore it here and let
+    // the parent stop us through stdin, so the "done" counts still get reported.
+    signal(SIGINT, SIG_IGN)
     let finished = sink.finished
     DispatchQueue.global().async {
         while let line = readLine() {

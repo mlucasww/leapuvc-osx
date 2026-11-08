@@ -26,6 +26,9 @@ from leapmac import capture  # noqa: E402
 LABELS_KEPT = 240
 SAMPLE_EVERY_FRAMES = 500
 REPORT_EVERY_S = 30
+# A Leap can stream steadily but slowly, every frame intact, so a clean run must
+# also come close to the mode's rated frame rate (57.5 FPS at 640x480).
+MIN_RATED_FRACTION = 0.99
 
 
 class FrameLog:
@@ -106,6 +109,9 @@ def main():
     leap.join(timeout=10)
 
     done = leap.helper.event("done") or {}
+    started_event = leap.helper.event("started") or {}
+    rates = (started_event.get("active_format") or {}).get("frame_rates") or []
+    rated_fps = max((r["max"] for r in rates), default=None)
     torn = getattr(leap, "torn", None)
     published = done.get("frames_published", 0)
     report = {
@@ -123,6 +129,7 @@ def main():
         "frames_after_reader_stopped": max(0, published - leap.lastSequence),
         "torn_frames": torn,
         "helper_summary": done,
+        "rated_fps": rated_fps,
         "largest_frame_gap_ms": round(log.largest_gap_ms, 1),
         "frame_gap_histogram_ms": {str(key): log.pts_gaps_ms[key] for key in sorted(log.pts_gaps_ms)},
         "frame_label_counts": {str(key): value for key, value in sorted(log.label_counts.items())},
@@ -137,6 +144,8 @@ def main():
         and torn == 0
         and leap.framesSkipped == 0
         and done.get("frames_dropped") == 0
+        and rated_fps is not None
+        and done.get("measured_fps", 0) >= rated_fps * MIN_RATED_FRACTION
     )
     report["clean"] = clean
 
@@ -146,7 +155,8 @@ def main():
 
     print()
     print("CLEAN RUN" if clean else "Problems found")
-    print(f"{leap.framesReceived} frames in {elapsed:.1f} s, {done.get('measured_fps', 0):.2f} FPS")
+    rated = f"rated {rated_fps:.1f}" if rated_fps else "rated rate unknown"
+    print(f"{leap.framesReceived} frames in {elapsed:.1f} s, {done.get('measured_fps', 0):.2f} FPS ({rated})")
     print(f"Skipped {leap.framesSkipped}, torn {torn}, dropped {done.get('frames_dropped')}")
     print(f"Largest frame gap {log.largest_gap_ms:.1f} ms, frame labels {dict(log.label_counts)}")
     print(f"Report: {path}")

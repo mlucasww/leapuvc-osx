@@ -24,6 +24,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import cv2
 import numpy as np
 import rerun as rr
 import rerun.blueprint as rrb
@@ -34,6 +35,10 @@ sys.path.insert(0, str(ROOT))
 from leapmac import calibration_cache, capture, pointcloud, stereo  # noqa: E402
 
 RESOLUTION = (640, 480)
+# The Leap advertises 57.5 FPS at 640x480 and measures 57.55 when healthy. A
+# Leap can also stream steadily but slowly, at 42 to 53 FPS, until replugged,
+# with nothing lost on the way, so a clean run must reach this rate too.
+MIN_HEALTHY_FPS = 57.0
 REPORT_EVERY_S = 5.0
 FRAME_TIMEOUT_S = 3.0
 POINT_RADIUS_UI = 1.5
@@ -51,6 +56,14 @@ def parse_args():
         "--replay-fps", type=float, default=57.5, help="frame rate to replay at; 0 replays as fast as possible"
     )
     parser.add_argument("--save", type=Path, help="write an .rrd file instead of opening the viewer")
+    parser.add_argument(
+        "--no-viewer", action="store_true", help="build clouds but send them nowhere, to measure stereo's load alone"
+    )
+    parser.add_argument(
+        "--single-thread",
+        action="store_true",
+        help="run OpenCV on one thread; its macOS GCD backend can't limit threads any other way",
+    )
     parser.add_argument("--exposure", type=int, help="exposure in microseconds")
     parser.add_argument("--gain", type=int, help="analog gain, 16 to 63")
     parser.add_argument("--digital-gain", type=int, help="digital gain, 4 to 15")
@@ -133,16 +146,33 @@ def log_cloud(index, cloud, rates, max_depth_m):
 
 
 class FrameGaps:
-    """Track the largest gap between frame timestamps, from the capture thread."""
+    """Track frame timing from the capture thread: the largest gap between
+    timestamps, and the frame rate in each minute, so a slowdown shows when it
+    started."""
 
     def __init__(self):
+        self.first_pts_ns = None
         self.last_pts_ns = None
         self.largest_ms = 0.0
+        self.per_minute = []
 
     def __call__(self, sequence, pts_ns, embedded_line, image):
+        if self.first_pts_ns is None:
+            self.first_pts_ns = pts_ns
         if self.last_pts_ns is not None:
             self.largest_ms = max(self.largest_ms, (pts_ns - self.last_pts_ns) / 1e6)
         self.last_pts_ns = pts_ns
+        minute = int((pts_ns - self.first_pts_ns) // 60_000_000_000)
+        while len(self.per_minute) <= minute:
+            self.per_minute.append(0)
+        self.per_minute[minute] += 1
+
+    def fps_by_minute(self):
+        """Frames per second in each minute. A final partial minute is left out."""
+        if self.last_pts_ns is None:
+            return []
+        whole = int((self.last_pts_ns - self.first_pts_ns) // 60_000_000_000)
+        return [round(count / 60, 2) for count in self.per_minute[:whole]]
 
 
 class LiveSource:
@@ -189,6 +219,7 @@ class LiveSource:
             "frames_dropped_by_helper": done.get("frames_dropped"),
             "helper_fps": done.get("measured_fps"),
             "largest_frame_gap_ms": round(self.gaps.largest_ms, 1),
+            "fps_by_minute": self.gaps.fps_by_minute(),
         }
 
 
@@ -237,6 +268,8 @@ def main():
         stride=args.stride,
         num_disparities=args.num_disparities,
     )
+    if args.single_thread:
+        cv2.setNumThreads(1)
     stopping = []
     signal.signal(signal.SIGINT, lambda *_: stopping.append(True))
     source = ReplaySource(args) if args.replay else LiveSource(args)
@@ -253,7 +286,8 @@ def main():
             source.calibration, RESOLUTION, disparity_offset_px=args.disparity_offset
         )
         builder = pointcloud.CloudBuilder(rig, settings)
-        start_rerun(args, rig)
+        if not args.no_viewer:
+            start_rerun(args, rig)
         started = time.monotonic()
         next_report = started + REPORT_EVERY_S
         next_cloud = started
@@ -278,12 +312,13 @@ def main():
 
             cloud = builder.process(frame)
             logging_started = time.perf_counter()
-            log_cloud(
-                clouds,
-                cloud,
-                {"capture": capture_rate.rate, "cloud": cloud_rate.rate},
-                args.max_depth,
-            )
+            if not args.no_viewer:
+                log_cloud(
+                    clouds,
+                    cloud,
+                    {"capture": capture_rate.rate, "cloud": cloud_rate.rate},
+                    args.max_depth,
+                )
             cloud_rate.tick()
             clouds += 1
 
@@ -319,6 +354,8 @@ def main():
             "depth_range_m": [args.min_depth, args.max_depth],
             "stride": args.stride,
             "num_disparities": args.num_disparities,
+            "viewer": not args.no_viewer,
+            "single_thread": args.single_thread,
         },
         "clouds": clouds,
         "cloud_rate": round((clouds - counted_from[1]) / counted_s, 2) if counted_s else None,
@@ -333,6 +370,7 @@ def main():
             capture_report["frames_skipped_by_reader"] == 0
             and capture_report["torn_frames"] == 0
             and capture_report["frames_dropped_by_helper"] == 0
+            and (capture_report["helper_fps"] or 0) >= MIN_HEALTHY_FPS
         )
 
     args.out.mkdir(parents=True, exist_ok=True)

@@ -2,7 +2,7 @@
 
 This folder is the Apple Silicon port of LeapUVC. The goal is a live 3D point cloud from an unlocked Leap Motion Controller, to help judge scene layout for a mirrorless camera.
 
-**Status:** On an unlocked Leap, the capture library streams at 57.55 FPS without root, and metric depth is within 4% up to 1.1 m. Phase 3, the live point cloud, is written and waiting for its hardware checks.
+**Status:** On an unlocked Leap, the capture library streams at 57.55 FPS without root, and metric depth is within 4% up to 1.1 m. Phase 3, the live point cloud, keeps up on hardware. The test Leap slows to 45–53 FPS about 90 minutes after it's plugged in, so replug it before a long run (see [docs/macos-port.md](../docs/macos-port.md#the-leap-slows-down-after-being-plugged-in)).
 
 Design notes and results are in [docs/macos-port.md](../docs/macos-port.md).
 
@@ -99,6 +99,8 @@ To check the stream, count every frame for 10 minutes:
 .venv/bin/python tools/stream_test.py --seconds 600
 ```
 
+A clean run loses no frames and reaches 99% of the mode's rated frame rate, 57.5 FPS at 640×480.
+
 Mount the Leap with its long edge horizontal and the green light at the bottom, which gives an upright image.
 
 ## Show the live point cloud
@@ -109,7 +111,7 @@ Run this from Terminal.app:
 make cloud
 ```
 
-The Rerun viewer opens with the 3D cloud, the rectified left image, the depth image, and plots of rates and processing time. Press Ctrl-C in Terminal to stop. Each run writes `probe_out/cloud-<timestamp>.json`, and `capture_clean` in it says whether capture lost anything while stereo ran.
+The Rerun viewer opens with the 3D cloud, the rectified left image, the depth image, and plots of rates and processing time. Press Ctrl-C in Terminal to stop. Each run writes `probe_out/cloud-<timestamp>.json`, and `capture_clean` in it says whether capture lost anything while stereo ran and kept at least 57 FPS. `capture.fps_by_minute` shows when a slowdown started.
 
 The tool takes the same exposure and gain options as `depth_test.py`, plus these:
 
@@ -121,6 +123,8 @@ The tool takes the same exposure and gain options as `depth_test.py`, plus these
 | `--stride` | 2 | Keep every nth pixel in each direction |
 | `--seconds` | 0 | Stop after this long. 0 runs until Ctrl-C |
 | `--save` | none | Write an `.rrd` file instead of opening the viewer |
+| `--no-viewer` | off | Build clouds without sending them anywhere, to measure capture without Rerun |
+| `--single-thread` | off | Run SGBM on one core instead of all of them |
 
 To try it without a Leap, replay frames saved by `depth_test.py`:
 

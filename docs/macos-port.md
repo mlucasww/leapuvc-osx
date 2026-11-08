@@ -4,7 +4,7 @@ This records why the port is built the way it is and what testing found. Setup a
 
 ## Restarting this work
 
-**Where it stands:** Phases 0 and 1 are complete. Phase 2 gives depth within 4% up to 1.1 m. Its branch, `macos-port-phase-2`, isn't merged, and two results aren't written up below yet: the far-range reruns at gain 40, and the 0.17 px offset fitted on all five wall runs. Phase 3, the live point cloud, is written on `macos-port-phase-3`, built on Phase 2, and waits for its hardware checks.
+**Where it stands:** Phases 0 and 1 are complete. Phase 2 gives depth within 4% up to 1.1 m. Its branch, `macos-port-phase-2`, isn't merged, and two results aren't written up below yet: the far-range reruns at gain 40, and the 0.17 px offset fitted on all five wall runs. Phase 3, the live point cloud, is on `macos-port-phase-3`, built on Phase 2. On hardware it keeps up and places a 0.5 m target correctly, but this Leap slows to 45–53 FPS about 90 minutes after it's plugged in, so the soak can't reach 57.5 FPS for reasons outside Phase 3 (see [The Leap slows down after being plugged in](#the-leap-slows-down-after-being-plugged-in)).
 
 **Ground rules, which still apply:**
 
@@ -30,11 +30,12 @@ This records why the port is built the way it is and what testing found. Setup a
    .venv/bin/python tools/stream_test.py --seconds 10
    ```
 
-**Next: Phase 3 hardware checks.** Each runs from Terminal.app with the Leap on its tripod:
+   A run below 99% of the mode's rated rate isn't clean. If the Leap has been plugged in for more than an hour or so, replug it first.
 
-1. `make cloud` opens the viewer. Check the cloud looks like the room, and updates smoothly at 30 per second.
-2. A 10-minute soak with the viewer open: `.venv/bin/python tools/live_cloud.py --seconds 600 --disparity-offset 0.17`. The report's `capture_clean` must be true, at about 57.55 FPS.
-3. Place two objects at tape-measured distances, such as 0.5 and 1.0 m, and check their depth in the viewer.
+**Next:**
+
+1. Confirm the viewer updates smoothly at 30 clouds a second (`make cloud`). This is the one Phase 3 check not yet reported.
+2. Decide what to do about the slowdown: find its cause, live with replugging before long runs, or relax the soak's frame-rate requirement.
 
 **Later phases:** Phase 4 adds the camera mount, and Phase 5 finishes the documentation. Tethered camera control stays out of scope for now.
 
@@ -93,7 +94,7 @@ Still to fix in Phase 2: `parseLeapCalibration` rectifies each camera to its own
 | 0. Prove the path on hardware | Done: Path A confirmed |
 | 1. Capture and control port | Done |
 | 2. Metric stereo | Depth within 4% up to 1.1 m, far range still to measure |
-| 3. Live point cloud | Written, keeps up with 57.5 FPS on replayed frames, hardware checks to run |
+| 3. Live point cloud | Keeps up on hardware with nothing skipped, 0.5 m target correct. Viewer smoothness to confirm. The 57.5 FPS soak fails because the Leap slows down |
 | 4. Camera mount | Not started |
 | 5. Documentation and handover | Not started |
 
@@ -365,7 +366,63 @@ Frames saved by `depth_test.py` at 0.497 m, replayed for 10 s on the test Mac, w
 
 SGBM is most of the processing time. So the pipeline can keep up with every frame, though with little headroom, which is one more reason for the cap.
 
-**Not yet shown:** that live capture stays clean with stereo and the viewer running alongside, that the viewer itself keeps up on screen, and that the cloud's geometry matches a measured scene. Those are the three hardware checks above.
+### Hardware checks, 2026-11-07 and 08
+
+**The pipeline keeps up live.** The second 10-minute soak, with the viewer open and SGBM on all cores:
+
+| Measure | Result |
+|---|---|
+| Clouds per second | 29.96, against the cap of 30 |
+| Processing, median and 95th percentile | 15.2 ms and 17.0 ms |
+| Logging, median | 2.1 ms |
+| Points per cloud, median | about 26,000 |
+| Frames skipped by the reader, torn or dropped | 0, 0 and 0 |
+| Capture rate | 48.2 FPS, because the Leap had slowed down (below) |
+
+The first soak, on 2026-11-07, skipped 6 frames with a 168 ms gap, also while the Leap was slow. That didn't recur in the second soak or in shorter runs, so it isn't treated as a Phase 3 fault. Watch for it in later soaks.
+
+**Depth at measured distances.** A target at 0.5 m reads correctly in the viewer. A target at 1.0 m appears only as a rough cloud, which is expected for this short-range camera:
+
+- An object at 1 m is only about 5.3 px apart in the two images, against 10.7 px at 0.5 m.
+- Depth error grows with the square of distance, so a quarter-pixel matching error is about ±1.2 cm at 0.5 m but about ±5 cm at 1 m. Single-frame points spread along the line of sight.
+- The lens is very wide, so a 20 cm object at 1 m covers about 27 px, or 13 points across at the default stride of 2.
+
+Phase 2's "within 4% to 1.1 m" still holds, because it took a median over a region and over several frames. Averaging disparity over a few frames, for a still scene, would be the cheapest improvement if the far range matters.
+
+**Viewer smoothness** on screen hasn't been reported yet.
+
+### The Leap slows down after being plugged in
+
+On 2026-11-07 the capture rate wandered between 42 and 55 FPS from run to run, where Phases 0 and 1 had measured a steady 57.55. Every run was still clean in every other way: no frames skipped, torn or dropped. The frame interval itself stretched, from 17 ms to 18 ms in mild cases and 21–25 ms in the worst. A replug brought back 57.5 FPS each time, until the next slowdown.
+
+**What it isn't:**
+
+| Suspect | Evidence against it |
+|---|---|
+| Phase 3's load | Capture alone was slowest of all, at 42.5 FPS. The first live run was already slow before any viewer was open |
+| Exposure or gain | Every frame's embedded line reads exposure 300 and gain 16, in healthy and slow runs alike |
+| Heat from streaming | The second soak was slow from its first minute |
+| Power or a weak link | Mains power, Low Power Mode off, connected straight to a root port at 480 Mb/s |
+| One USB port or controller | Moving to the other USB-C port, on its own controller, gave 57.53 FPS at first, then about 50 FPS some 90 minutes later |
+| macOS's camera driver alone | Restarting UVCAssistant without replugging raised the rate from 45.1 to only 53.1 FPS, within the run-to-run variation |
+
+**It's a throughput limit.** The slow runs move about the same bytes per second whatever the frame size:
+
+| Run | Frame rate | Throughput |
+|---|---|---|
+| Healthy, 640×480 | 57.55 FPS | 35.4 MB/s |
+| Slow, 640×480 | 45.1 FPS | 27.7 MB/s |
+| Slow, 640×240, rated 115 FPS | 98.7 FPS | 30.3 MB/s |
+
+640×480 at 57.5 FPS needs 35.4 MB/s over a bulk endpoint, close to what USB 2.0 carries in practice. When less gets through, the Leap waits rather than dropping frames.
+
+**Timing:** twice now, a replug gave a healthy stream and about 90 minutes later the Leap was slow again: 21:46 healthy and 23:15 slow on the first port, 10:45 healthy and 12:14 slow on the second. The Leap had been idle in between both times. The likeliest cause is in the Leap itself, perhaps its temperature while powered, but two cases don't prove that. On 2026-11-04 it stayed healthy from the first probe at 21:56 to the last stream at 23:15, and again the next morning, so the timing isn't exact.
+
+**Tool changes that came out of this:**
+
+- `stream_test.py` and `live_cloud.py` only call a run clean if the capture rate is close to the rated one: 99% of it for `stream_test.py` and 57 FPS for `live_cloud.py`. Before, a steady 42 FPS run passed.
+- `live_cloud.py` records the capture rate for each minute in its report, so a slowdown shows when it started.
+- `leapcap` ignores Ctrl-C and stops when Python tells it to, so a run stopped early still reports its frame counts. Before, Ctrl-C reached the helper too and the report lost them.
 
 ## Sources
 
